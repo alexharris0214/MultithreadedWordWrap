@@ -34,10 +34,10 @@ void writeContent(char **list, int lineLength, char *fileName){
     int currentSize = 0;
     int counter = 0;
     if(strcmp(fileName, "-1") == 0){
-        while(currentSize + strlen(list[counter]) <= lineLength){
-            // writing implementation
-            currentSize += strlen(list[counter]) + 1; // increments currentSize while accounting for whitespace
-        }   
+        // while(currentSize + strlen(list[counter]) <= lineLength){
+        //     // writing implementation
+        //     currentSize += strlen(list[counter]) + 1; // increments currentSize while accounting for whitespace
+        // }   
     }
 
     printf("%s\n", fileName);
