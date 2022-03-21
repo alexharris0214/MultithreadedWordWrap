@@ -29,8 +29,18 @@ char **sort(char **list){
 * if file argument was a directory, ouput will be written to a file with the name
 * of the file within specified direcotry with the prefix "wrap"
 */
-void writeContent(char **list, char *fileName){
+void writeContent(char **list, int lineLength, char *fileName){
     // NEEDS TO BE IMPLEMENTED
+    int currentSize = 0;
+    int counter = 0;
+    if(strcmp(fileName, "-1") == 0){
+        while(currentSize + strlen(list[counter]) <= lineLength){
+            // writing implementation
+            currentSize += strlen(list[counter]) + 1; // increments currentSize while accounting for whitespace
+        }   
+    }
+
+    printf("%s\n", fileName);
 }
 
 int main(int argc, char const *argv[])
@@ -82,31 +92,23 @@ int main(int argc, char const *argv[])
     if(fd != -1){
         wordList = readFile(fd);
         sort(wordList);
-        writeContent(wordList, argv[2]);
+        writeContent(wordList, argv[1], "-1");
     } else { // Situation in which we have a directory
-        while ((dp = readdir(dr)) != NULL)
-        {
-            struct stat stbuf;
-            if( stat(filename_qfd,&stbuf ) == -1 )
-            {
-            printf("Unable to stat file: %s\n",filename_qfd) ;
-            continue ;
-            }
+        chdir(argv[2]); // Changing the working directory to have access to the files we need
+        while ((dp = readdir(dr)) != NULL){ // while theyre are files to be read
 
-            if ( ( stbuf.st_mode & S_IFMT ) == S_IFDIR )
-            {
-            continue;
-            // Skip directories
+            // case where name of file is just a reference to current/parent directory
+            if(strcmp(dp->d_name, "..") ==0 || strcmp(dp->d_name, ".") ==0){
+                continue;
             }
-            else
-            {
-            char* new_name = get_new_name( dp->d_name ) ;// returns the new string
-                                                // after removing reqd part
-            sprintf(new_name_qfd,"%s/%s",dir,new_name) ;
-            rename( filename_qfd , new_name_qfd ) ;
+    
+            // open the current file that we are on and work on it
+            fd = open(dp->d_name, O_RDONLY);
+            if(fd > 0){
+                wordList = readFile();
+                sort(wordList);
+                writeContent(wordList, argv[1], dp->d_name); // Calling with the name of the file
             }
-        }
         }
     }
-
 }
