@@ -18,11 +18,6 @@ char **readFile(){
 
 }
 
-// Returns a sorted list given a list of strings
-char **sort(char **list){
-    // NEEDS TO BE IMPLEMENTED
-}
-
 /*
 * Take the sorted list and writes them to standard output if the file argument 
 * was a regular file
@@ -58,7 +53,7 @@ int main(int argc, char const *argv[])
     * if it was, check to see if file argument is a directory or normal file
     * if not, exit with failure
     */
-    if(argc > 2){
+    if(argc == 3){
         err = stat(argv[2], &statbuf);
         // Checking to see if fstat returned a valid stat struct
         if(err){
@@ -79,6 +74,11 @@ int main(int argc, char const *argv[])
                 return EXIT_FAILURE;
             }
         }
+    } else if(argc==2){
+        fd = open(0, O_RDONLY);
+        if(fd == -1){
+            puts("Could not open standard input");
+        }
     } else { // fall through case when not enough arguments are passed
         puts("Not enough arguments");
         return EXIT_FAILURE;
@@ -89,9 +89,8 @@ int main(int argc, char const *argv[])
     */
 
     // Scenario in which we have a file
-    if(fd != -1){
+    if(!(fd <= 0)){
         wordList = readFile(fd);
-        sort(wordList);
         writeContent(wordList, argv[1], "-1");
     } else { // Situation in which we have a directory
         chdir(argv[2]); // Changing the working directory to have access to the files we need
@@ -106,7 +105,6 @@ int main(int argc, char const *argv[])
             fd = open(dp->d_name, O_RDONLY);
             if(fd > 0){
                 wordList = readFile();
-                sort(wordList);
                 writeContent(wordList, argv[1], dp->d_name); // Calling with the name of the file
             }
         }
