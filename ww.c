@@ -6,12 +6,53 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <string.h>
-#define BUFFSIZE 256
 
 
+/*
+* Returns a string with the prefix "wrap."
+* placed in front of the desired string passed in,
+* which in this case is the file name of the input file
+* lying within the specified directory
+*/
+char *getOutputName(char *output){
+    char *outputFileName = malloc(sizeof(output) + 6); // 6 is hardcoded to be length of "wrao." (5 character), and 1 for string terminator
+
+    // manually assining the prefix
+    outputFileName [0]= 'w';
+    outputFileName [1]= 'r';
+    outputFileName [2]= 'a';
+    outputFileName [3]= 'p';
+    outputFileName [4]= '.';
+
+    // assigning the rest of the string according the input file name
+    for(int i = 0; i<sizeof(output); i++){
+        outputFileName[5+i] = output[i];
+    }
+    // placing terminator character
+    outputFileName[sizeof(output) + 5] = '\0';
+
+    return outputFileName;
+}
 
 void reformatFile(int fd, int lineLength, char *output){
+    int outputFile = 1; // by default, output is to STDOUT
+    char *buff = malloc(lineLength);
+
+    if(output != NULL){ // if we have a desired outputFile, switch to that
+        char *outputFileName = getOutputName(output);
+        outputFile = open(outputFileName, O_WRONLY|O_CREAT|O_TRUNC, 0700); // creating file if it does not exist with user RWX permissions
+        if(outputFile <= 0){ // checking to see if open returned successfully
+            puts("Could not open/create desired outpfile");
+            perror(outputFile);
+            return EXIT_FAILURE;
+        }
+    }
     
+    /* BEGING READ/WRITE IMPLEMENTATION HERE */
+
+
+    // testing that writing is writing to correct place
+    write(outputFile, "Hlo", 3);
 }
 
 
@@ -46,7 +87,7 @@ int main(int argc, char const *argv[])
             while ((dp = readdir(dr)) != NULL){ // while theyre are files to be read
 
                 // case where name of file is just a reference to current/parent directory
-                if(strcmp(dp->d_name, "..") ==0 || strcmp(dp->d_name, ".") ==0){
+                if(strcmp(dp->d_name, "..") ==0 || strcmp(dp->d_name, ".") ==0 || strstr(dp->d_name, "wrap") != NULL){
                     continue;
                 }
         
@@ -72,4 +113,5 @@ int main(int argc, char const *argv[])
         puts("Not enough arguments");
         return EXIT_FAILURE;
     }
+    return 0;
 }
