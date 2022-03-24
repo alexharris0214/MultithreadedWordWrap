@@ -55,10 +55,14 @@ int reformatFile(int fd, int lineLength, char *output){
     char *currWord = (char *)malloc(sizeof(char)*(lineLength + 1));     
     memset(currWord, '\0', sizeof(currWord));
 
+
     int bytesRead = read(fd, buffer, BUFFER_SIZE);
 
     while(bytesRead > 0){
+
         for(i = 0; i < bytesRead; i++){
+
+            // Only need to reset buffer to empty when bytes read will not completely overwrite
             if(isspace(buffer[i])){     //current character is whitespace
                 if(currWord[0] != '\0'){
                     if(strlen(currWord) >= lineLength){
@@ -93,8 +97,14 @@ int reformatFile(int fd, int lineLength, char *output){
                     currWord = (char *)realloc(currWord, (sizeof(char)*(sizeof(currWord)*2)));
                     memset(&currWord[strlen(currWord)], '\0', (sizeof(currWord) - strlen(currWord)));
                 }
+                
                 currWord[strlen(currWord)] = (char)buffer[i];
+                
             }
+        }
+        // Resetting the buffer if there is less bytes read than buffer length
+        if(bytesRead != BUFFER_SIZE){
+            memset(buffer, ' ', sizeof(buffer));
         }
         bytesRead = read(fd, buffer, BUFFER_SIZE);
     }
