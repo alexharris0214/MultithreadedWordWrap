@@ -137,6 +137,10 @@ int reformatFile(int fd, int lineLength, char *output){
         printf("ERROR: File %d contains a word longer than specified line length.", fd);
         free(currWord);
         return EXIT_FAILURE;
+    } else {
+        // Printing the last currWord in the file that is the result of a fall through
+        write(outputFile, " ", 1);
+        write(outputFile, currWord, strlen(currWord));
     }
 
     free(currWord);
