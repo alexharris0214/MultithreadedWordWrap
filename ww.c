@@ -57,7 +57,7 @@ int reformatFile(int fd, int lineLength, char *output){
 
 
     int bytesRead = read(fd, buffer, BUFFER_SIZE);
-    printf(" -%s-\n",buffer);
+
     while(bytesRead > 0){
 
         for(i = 0; i < bytesRead; i++){
@@ -112,10 +112,12 @@ int reformatFile(int fd, int lineLength, char *output){
     if(sizeof(currWord) > (sizeof(char)*(lineLength + 1))){       //we had a word larger than a line
         printf("ERROR: File %d contains a word longer than specified line length.", fd);                /* is there some way to get the file name to return instead of the descriptor? */
         return EXIT_FAILURE;
+    } else {
+        // Printing the last currWord in the file that is the result of a fall through
+        write(outputFile, " ", 1);
+        write(outputFile, currWord, strlen(currWord));
     }
-    // Printing the last currWord in the file that is the result of a fall through
-    write(outputFile, " ", 1);
-    write(outputFile, currWord, strlen(currWord));
+
 
     return EXIT_SUCCESS;
 }
