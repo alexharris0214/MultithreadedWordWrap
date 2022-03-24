@@ -18,7 +18,7 @@
 * lying within the specified directory
 */
 char *getOutputName(char *output){
-    char *outputFileName = (char *)malloc(sizeof(output) + 6); // 5 is hardcoded to be length of "wrap." (5 character)
+    char *outputFileName = (char *)malloc(sizeof(output) + 5); // 5 is hardcoded to be length of "wrap." (5 character)
 
     // manually assigning the prefix
     outputFileName [0]= 'w';
@@ -39,7 +39,9 @@ int reformatFile(int fd, int lineLength, char *output){
     int outputFile = 1; // by default, output is to STDOUT
 
     if(output != NULL){ // if we have a desired outputFile, switch to that
-        outputFile = open(getOutputName(output), O_WRONLY|O_CREAT|O_TRUNC, 0700); // creating file if it does not exist with user RWX permissions
+        char *outputFilename = getOutputName(output);
+        outputFile = open(outputFilename, O_WRONLY|O_CREAT|O_TRUNC, 0700); // creating file if it does not exist with user RWX permissions
+        free(outputFilename);
         if(outputFile <= 0){ // checking to see if open returned successfully 
             puts("Could not open/create desired output file");
             perror(outputFile);
@@ -51,18 +53,16 @@ int reformatFile(int fd, int lineLength, char *output){
     int seenTerminator = 0;
     int i;
 
-    char buffer[BUFFER_SIZE];
-    char *currWord = (char *)malloc(sizeof(char)*(lineLength + 1));     
-    memset(currWord, '\0', sizeof(currWord));
+    char buffer[BUFFER_SIZE];                                           //buffer for data read from input
+    char *currWord = (char *)malloc(sizeof(char)*(lineLength + 1));     //buffer for words to write to output
+    int currWordSize = sizeof(char)*(lineLength + 1);                   //keep track of output buffer size
+    memset(currWord, '\0', currWordSize);
 
 
     int bytesRead = read(fd, buffer, BUFFER_SIZE);
-    printf(" -%s-\n",buffer);
     while(bytesRead > 0){
 
         for(i = 0; i < bytesRead; i++){
-
-            // Only need to reset buffer to empty when bytes read will not completely overwrite
             if(isspace(buffer[i])){     //current character is whitespace
                 if(currWord[0] != '\0'){
                     if(strlen(currWord) >= lineLength){
@@ -83,40 +83,63 @@ int reformatFile(int fd, int lineLength, char *output){
                         write(outputFile, currWord, strlen(currWord));
                         lineSpot = (1 + strlen(currWord));
                     }
-                } else if(buffer[i] == '\n'){
-                    if(seenTerminator){
-                        write(outputFile, "\n", 1);
+                    if(buffer[i] == '\n'){
+                        seenTerminator = 1;
+                    } else {
+                        seenTerminator = 0;
+                    }
+                    memset(currWord, '\0', currWordSize);  //clear currWord and start a new word
+                } else if(buffer[i] == '\n'){       //if currWord is empty, check if we need to start a new paragraph
+                    if(seenTerminator){             //FIXME: add mechanism to make sure any amount of line breaks between paragraphs only makes two
+                        write(outputFile, "\n\n", 2);
+                        lineSpot = 0;
                         seenTerminator = 0;
                     } else {
                         seenTerminator = 1;
                     }
                 }
-                memset(currWord, '\0', sizeof(currWord));  //clear currWord and start a new word
             } else {                  //current character is non-whitespace
-                if(strlen(currWord) == (sizeof(currWord) - 1)){
-                    currWord = (char *)realloc(currWord, (sizeof(char)*(sizeof(currWord)*2)));
-                    memset(&currWord[strlen(currWord)], '\0', (sizeof(currWord) - strlen(currWord)));
+                if(strlen(currWord) == (currWordSize - 1)){
+                    currWord = (char *)realloc(currWord, (currWordSize*2));
+                    currWordSize *= 2;
+                    memset((currWord + currWordSize/2), '\0', (currWordSize/2));
                 }
                 
                 currWord[strlen(currWord)] = (char)buffer[i];
             }
         }
-
         // Resetting the buffer before we reassign to it
-        memset(buffer, ' ', sizeof(buffer));
+        // Only need to reset buffer to empty when bytes read will not completely overwrite
+        memset(buffer, '\0', sizeof(buffer));
             
         bytesRead = read(fd, buffer, BUFFER_SIZE);
         // printf(" -%s-\n",buffer);
     }
+    //Need to print last word
+    if(currWord[0] != '\0'){
+        if(strlen(currWord) >= lineLength){
+            write(outputFile, "\n", 1);
+            write(outputFile, currWord, strlen(currWord));
+            write(outputFile, "\n", 1);
+        } else if(lineSpot == 0){                                 //if we're at the beginning of the line
+            write(outputFile, currWord, strlen(currWord));
+        } else if(lineSpot + 1 + strlen(currWord) <= lineLength){ //need to have room for a space preceding the word
+            write(outputFile, " ", 1);
+            write(outputFile, currWord, strlen(currWord));        //write currWord preceded by a space
+        } else {                                                  //if the word plus a space didn't fit, we need to start a new line
+            write(outputFile, "\n", 1);
+            write(outputFile, currWord, strlen(currWord));
+            lineSpot = (1 + strlen(currWord));
+        }
+    }
 
-    if(sizeof(currWord) > (sizeof(char)*(lineLength + 1))){       //we had a word larger than a line
-        printf("ERROR: File %d contains a word longer than specified line length.", fd);                /* is there some way to get the file name to return instead of the descriptor? */
+    if(currWordSize > (sizeof(char)*(lineLength + 1))){       //we had a word larger than a line
+        printf("ERROR: File %d contains a word longer than specified line length.", fd);
+        free(currWord);
         return EXIT_FAILURE;
     }
-    // Printing the last currWord in the file that is the result of a fall through
-    write(outputFile, " ", 1);
-    write(outputFile, currWord, strlen(currWord));
 
+    free(currWord);
     return EXIT_SUCCESS;
 }
 
@@ -174,6 +197,7 @@ int main(int argc, char const *argv[])
                         exitFlag = EXIT_FAILURE;
                 }
             }
+            free(dr);
         } else{ // file argument is a regular file
             fd = open(argv[2], O_RDONLY);
             if(fd <= 0){
