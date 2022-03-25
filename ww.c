@@ -35,7 +35,14 @@ char *getOutputName(char *output){
     return outputFileName;
 }
 
-int reformatFile(int fd, int lineLength, char *output){
+/*
+*   Uses an input buffer to read data from input file fd,
+*   processes data from input buffer character-by-character,
+*   composing non-whitespace characters into words via output buffer,
+*   and then using whitespace characters as cues for writing words 
+*   or starting new paragraphs in the output file.
+*/
+int normalize(int fd, int lineLength, char *output){
     int outputFile = 1; // by default, output is to STDOUT
 
     if(output != NULL){ // if we have a desired outputFile, switch to that
@@ -43,14 +50,15 @@ int reformatFile(int fd, int lineLength, char *output){
         outputFile = open(outputFilename, O_WRONLY|O_CREAT|O_TRUNC, 0700); // creating file if it does not exist with user RWX permissions
         free(outputFilename);
         if(outputFile <= 0){ // checking to see if open returned successfully 
-            puts("Could not open/create desired output file");
+            puts("ERROR: Could not open/create desired output file.\n");
             perror(outputFile);
             return EXIT_FAILURE;
         }
     }
     
-    int lineSpot = 0;
-    int seenTerminator = 0;
+    int lineSpot = 0;           //keeps track of the spot we are at in the current output file line
+    int seenTerminator = 0;     //keeps track of consecutive newlines
+    int paragraphFilled = 0;    //keeps track of if the current paragraph has any non-whitespace text in it yet
     int i;
 
     char buffer[BUFFER_SIZE];                                           //buffer for data read from input
@@ -58,22 +66,35 @@ int reformatFile(int fd, int lineLength, char *output){
     int currWordSize = sizeof(char)*(lineLength + 1);                   //keep track of output buffer size
     memset(currWord, '\0', currWordSize);
 
+    int bytesRead;
 
-    int bytesRead = read(fd, buffer, BUFFER_SIZE);
+    if(fd == 0){    //if we are reading from stdinput, store input in a temporary file
+        int temp = open("./temp", __O_TMPFILE | O_RDWR, 0666);
+        bytesRead = read(fd, buffer, BUFFER_SIZE);
+        while(bytesRead > 0){
+            write(temp, buffer, sizeof(buffer));
+            memset(buffer, '\0', sizeof(buffer));
+            read(fd, buffer, BUFFER_SIZE);
+        }
+        fd = temp;
+        memset(buffer, '\0', sizeof(buffer));
+    }
+
+    bytesRead = read(fd, buffer, BUFFER_SIZE);
     while(bytesRead > 0){
 
         for(i = 0; i < bytesRead; i++){
             if(isspace(buffer[i])){     //current character is whitespace
                 if(currWord[0] != '\0'){
-                    if(strlen(currWord) >= lineLength){
+                    if(lineSpot == 0){                                  //if we're at the beginning of the line
+                        write(outputFile, currWord, strlen(currWord));
+                        lineSpot += strlen(currWord);
+                    } else if(strlen(currWord) >= lineLength){
                         write(outputFile, "\n", 1);
                         write(outputFile, currWord, strlen(currWord));
                         write(outputFile, "\n", 1);
                         seenTerminator = 1;
                         lineSpot = 0;
-                    }else if(lineSpot == 0){                                  //if we're at the beginning of the line
-                        write(outputFile, currWord, strlen(currWord));
-                        lineSpot += strlen(currWord);
                     } else if(lineSpot + 1 + strlen(currWord) <= lineLength){ //need to have room for a space preceding the word
                         write(outputFile, " ", 1);
                         write(outputFile, currWord, strlen(currWord));  //write currWord preceded by a space
@@ -89,22 +110,26 @@ int reformatFile(int fd, int lineLength, char *output){
                         seenTerminator = 0;
                     }
                     memset(currWord, '\0', currWordSize);  //clear currWord and start a new word
-                } else if(buffer[i] == '\n'){       //if currWord is empty, check if we need to start a new paragraph
-                    if(seenTerminator){             //FIXME: add mechanism to make sure any amount of line breaks between paragraphs only makes two
+                
+                } else if(buffer[i] == '\n' && paragraphFilled){       //if currWord is empty and the current paragraph contains non-whitespace characters, check if we need to start a new paragraph
+                    
+                    if(seenTerminator){                 //if this is the second consecutive newline, we can start a new paragraph
                         write(outputFile, "\n\n", 2);
                         lineSpot = 0;
                         seenTerminator = 0;
-                    } else {
+                        paragraphFilled = 0;
+                    } else {                            //if this is the first consecutive newline, keep track of it
                         seenTerminator = 1;
                     }
                 }
-            } else {                  //current character is non-whitespace
+
+            } else {                                                //if the current character is non-whitespace, then we can add it to the write buffer
                 if(strlen(currWord) == (currWordSize - 1)){
                     currWord = (char *)realloc(currWord, (currWordSize*2));
                     currWordSize *= 2;
                     memset((currWord + currWordSize/2), '\0', (currWordSize/2));
                 }
-                
+                paragraphFilled = 1;
                 currWord[strlen(currWord)] = (char)buffer[i];
             }
         }
@@ -113,7 +138,6 @@ int reformatFile(int fd, int lineLength, char *output){
         memset(buffer, '\0', sizeof(buffer));
             
         bytesRead = read(fd, buffer, BUFFER_SIZE);
-        // printf(" -%s-\n",buffer);
     }
     //Need to print last word
     if(currWord[0] != '\0'){
@@ -133,14 +157,12 @@ int reformatFile(int fd, int lineLength, char *output){
         }
     }
 
+    close(fd);
+
     if(currWordSize > (sizeof(char)*(lineLength + 1))){       //we had a word larger than a line
-        printf("ERROR: File %d contains a word longer than specified line length.", fd);
+        printf("ERROR: File %d contains a word longer than specified line length.\n", fd);
         free(currWord);
         return EXIT_FAILURE;
-    } else {
-        // Printing the last currWord in the file that is the result of a fall through
-        write(outputFile, " ", 1);
-        write(outputFile, currWord, strlen(currWord));
     }
 
     free(currWord);
@@ -183,21 +205,21 @@ int main(int argc, char const *argv[])
         if(S_ISDIR(statbuf.st_mode)){
             dr = opendir(argv[2]);
             if(dr <= 0 ){ // error checking to see if directory was opened
-                puts("Could not open directory");
+                puts("ERROR: Could not open directory.\n");
             }
             chdir(argv[2]); // Changing the working directory to have access to the files we need
             
-            while ((dp = readdir(dr)) != NULL){ // while theyre are files to be read
+            while ((dp = readdir(dr)) != NULL){ // while there are files to be read
 
                 // case where name of file is just a reference to current/parent directory
-                if(strcmp(dp->d_name, "..") ==0 || strcmp(dp->d_name, ".") ==0 || strstr(dp->d_name, "wrap") != NULL){    /* why both ".." and "."? */
+                if(strcmp(dp->d_name, "..") ==0 || strcmp(dp->d_name, ".") ==0 || strstr(dp->d_name, "wrap") != NULL){
                     continue;
                 }
         
                 // open the current file that we are on and work on it
                 fd = open(dp->d_name, O_RDONLY);
                 if(fd > 0){
-                    if(reformatFile(fd, length, dp->d_name) == EXIT_FAILURE)
+                    if(normalize(fd, length, dp->d_name) == EXIT_FAILURE)
                         exitFlag = EXIT_FAILURE;
                 }
             }
@@ -205,17 +227,17 @@ int main(int argc, char const *argv[])
         } else{ // file argument is a regular file
             fd = open(argv[2], O_RDONLY);
             if(fd <= 0){
-                puts("Could not open file");
+                puts("ERROR: Could not open file.\n");
                 return EXIT_FAILURE;
             }
-            exitFlag = reformatFile(fd, length, NULL);
+            exitFlag = normalize(fd, length, NULL);
         }
         // no file was passed in, reading from standard input
     } else if(argc==2){
-        reformatFile(0, length, NULL);
+        normalize(0, length, NULL);
         return EXIT_FAILURE;
     } else { // fall through case when not enough arguments are passed
-        puts("Not enough arguments");
+        puts("ERROR: Not enough arguments.\n");
         return EXIT_FAILURE;
     }
     return exitFlag;
