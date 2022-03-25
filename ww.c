@@ -68,19 +68,22 @@ int normalize(int fd, int lineLength, char *output){
 
     int bytesRead;
 
+    int inputFD = fd;
+
     if(fd == 0){    //if we are reading from stdinput, store input in a temporary file
-        int temp = open("./temp", __O_TMPFILE | O_RDWR, 0666);
+        inputFD = fileno(tmpfile());
         bytesRead = read(fd, buffer, BUFFER_SIZE);
         while(bytesRead > 0){
-            write(temp, buffer, sizeof(buffer));
+            write(inputFD, buffer, bytesRead);
             memset(buffer, '\0', sizeof(buffer));
-            read(fd, buffer, BUFFER_SIZE);
+            bytesRead = read(fd, buffer, BUFFER_SIZE);
         }
-        fd = temp;
+        close(fd);
+        lseek(inputFD, 0, SEEK_SET);
         memset(buffer, '\0', sizeof(buffer));
     }
 
-    bytesRead = read(fd, buffer, BUFFER_SIZE);
+    bytesRead = read(inputFD, buffer, BUFFER_SIZE);
     while(bytesRead > 0){
 
         for(i = 0; i < bytesRead; i++){
@@ -137,7 +140,7 @@ int normalize(int fd, int lineLength, char *output){
         // Only need to reset buffer to empty when bytes read will not completely overwrite
         memset(buffer, '\0', sizeof(buffer));
             
-        bytesRead = read(fd, buffer, BUFFER_SIZE);
+        bytesRead = read(inputFD, buffer, BUFFER_SIZE);
     }
     //Need to print last word
     if(currWord[0] != '\0'){
@@ -157,10 +160,11 @@ int normalize(int fd, int lineLength, char *output){
         }
     }
 
-    close(fd);
+    if(fd == 0)    //if we read from standard input, we must close the temporary file
+        close(inputFD);
 
     if(currWordSize > (sizeof(char)*(lineLength + 1))){       //we had a word larger than a line
-        printf("ERROR: File %d contains a word longer than specified line length.\n", fd);
+        printf("ERROR: File %d contains a word longer than specified line length.\n", inputFD);
         free(currWord);
         return EXIT_FAILURE;
     }
@@ -222,6 +226,7 @@ int main(int argc, char const *argv[])
                     if(normalize(fd, length, dp->d_name) == EXIT_FAILURE)
                         exitFlag = EXIT_FAILURE;
                 }
+                close(fd);
             }
             free(dr);
         } else{ // file argument is a regular file
@@ -231,6 +236,7 @@ int main(int argc, char const *argv[])
                 return EXIT_FAILURE;
             }
             exitFlag = normalize(fd, length, NULL);
+            close(fd);
         }
         // no file was passed in, reading from standard input
     } else if(argc==2){
