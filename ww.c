@@ -48,7 +48,7 @@ int normalize(int fd, int lineLength, char *output){
     if(output != NULL){ // if we have a desired outputFile, switch to that
         char *outputFilename = getOutputName(output);
         outputFile = open(outputFilename, O_WRONLY|O_CREAT|O_TRUNC, 0700); // creating file if it does not exist with user RWX permissions
-        free(outputFilename);
+        free(outputFilename); // frees outputFilename as it is no longer needed
         if(outputFile <= 0){ // checking to see if open returned successfully 
             puts("ERROR: Could not open/create desired output file.\n");
             perror(outputFile);
@@ -66,21 +66,23 @@ int normalize(int fd, int lineLength, char *output){
     int currWordSize = sizeof(char)*(lineLength + 1);                   //keep track of output buffer size
     memset(currWord, '\0', currWordSize);
 
-    int bytesRead;
+    int bytesRead; // variable keeping track of how many bytes were read in
 
+    // creating a file descriptor to a temporary file
+    // by default it is set to the input file
     int inputFD = fd;
 
     if(fd == 0){    //if we are reading from stdinput, store input in a temporary file
-        inputFD = fileno(tmpfile());
-        bytesRead = read(fd, buffer, BUFFER_SIZE);
-        while(bytesRead > 0){
-            write(inputFD, buffer, bytesRead);
-            memset(buffer, '\0', sizeof(buffer));
-            bytesRead = read(fd, buffer, BUFFER_SIZE);
+        inputFD = fileno(tmpfile()); // creating inputID to be a temp file
+        bytesRead = read(fd, buffer, BUFFER_SIZE); // reading from standard input
+        while(bytesRead > 0){ // checking that bytes were read
+            write(inputFD, buffer, bytesRead); // writing the bytes read in as is
+            memset(buffer, '\0', sizeof(buffer)); // resetting the buffer for over-write scenarios
+            bytesRead = read(fd, buffer, BUFFER_SIZE); // getting the next set of bytes if there are any
         }
-        close(fd);
-        lseek(inputFD, 0, SEEK_SET);
-        memset(buffer, '\0', sizeof(buffer));
+        close(fd); // closing input file since we're done with them
+        lseek(inputFD, 0, SEEK_SET); // setting the tmpfile offset back to the beginning of the file for writing
+        memset(buffer, '\0', sizeof(buffer)); // resetting buffer
     }
 
     bytesRead = read(inputFD, buffer, BUFFER_SIZE);
@@ -176,18 +178,26 @@ int normalize(int fd, int lineLength, char *output){
 
 int main(int argc, char const *argv[])
 {
-    /*handle incorrect arguments here*/
 
     int fd = -1; // File pointer
     DIR *dr = -1; // Directory pointer
     struct stat statbuf; // Holds file information to determine its type
-    struct dirent *dp;                                                          /* WHAT IS DP? */
+    struct dirent *dp;  // Temp variable to hold individual temp entries
     int err; // Variable to store error information
     int exitFlag = EXIT_SUCCESS; //determine what exit status we return
 
-    for(int i = 0; i < strlen(argv[1]); i++){ //check if length argument is a number
-        if(!isdigit(argv[1][i]))
-            return EXIT_FAILURE;
+    /*
+    * checking to see if arguments were passed in before accessing
+    * returns exit failure if no arguments were passed in 
+    */
+    if(argc>1){
+        for(int i = 0; i < strlen(argv[1]); i++){ //check if length argument is a number
+            if(!isdigit(argv[1][i])) // checking each digit individually
+                return EXIT_FAILURE;
+        }
+    } else {
+        puts("Error: Not enough arguments passed in");
+        return EXIT_FAILURE;
     }
 
     int length = atoi(argv[1]);
@@ -222,19 +232,22 @@ int main(int argc, char const *argv[])
         
                 // open the current file that we are on and work on it
                 fd = open(dp->d_name, O_RDONLY);
-                if(fd > 0){
+                if(fd > 0){ // checking to see if file opened successfully
                     if(normalize(fd, length, dp->d_name) == EXIT_FAILURE)
                         exitFlag = EXIT_FAILURE;
                 }
+                // close file when we are done
                 close(fd);
             }
+            // freeing directory object
             free(dr);
         } else{ // file argument is a regular file
             fd = open(argv[2], O_RDONLY);
-            if(fd <= 0){
+            if(fd <= 0){ // checking to see if file is opened succesfully
                 puts("ERROR: Could not open file.\n");
                 return EXIT_FAILURE;
             }
+            // reformatting file and assigning the result to return flag
             exitFlag = normalize(fd, length, NULL);
             close(fd);
         }
