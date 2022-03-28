@@ -218,7 +218,7 @@ int main(int argc, char const *argv[])
             }
             // freeing directory object
             free(dr);
-        } else{ // file argument is a regular file
+        } else if(S_ISREG(statbuf.st_mode)){ // file argument is a regular file
             fd = open(argv[2], O_RDONLY);
             if(fd <= 0){ // checking to see if file is opened successfully
                 puts("ERROR: Could not open file.\n");
@@ -227,12 +227,14 @@ int main(int argc, char const *argv[])
             // reformatting file and assigning the result to return flag
             exitFlag = normalize(fd, length, 1);
             close(fd);
+        } else {
+            puts("ERROR: Invalid file type passed as argument.\n");
+                return EXIT_FAILURE;
         }
-        // no file was passed in, reading from standard input
-    } else if(argc==2){
+    } else if(argc==2){     // no file was passed in; reading from standard input
         normalize(0, length, 1);
         return EXIT_FAILURE;
-    } else { // fall through case when not enough arguments are passed
+    } else {                // fall through case when not enough arguments are passed
         puts("ERROR: Not enough arguments.\n");
         return EXIT_FAILURE;
     }
