@@ -8,14 +8,13 @@
 #include <fcntl.h>
 #include <string.h>
 
-#define BUFFER_SIZE 1
-
+#define BUFFER_SIZE 16
 
 /*
-* Returns a string with the prefix "wrap."
-* placed in front of the desired string passed in,
-* which in this case is the file name of the input file
-* lying within the specified directory
+* char *output: a string containing a filename which needs to be written to
+*
+* Returns a string with the prefix "wrap." placed 
+* in front of the string passed in the parameter output.
 */
 char *getOutputName(char *output){
     char *outputFileName = (char *)malloc(sizeof(output) + 5); // 5 is hardcoded to be length of "wrap." (5 character)
@@ -61,7 +60,12 @@ int normalize(int inputFD, int lineLength, int outputFD){
     
     int bytesRead; // variable keeping track of how many bytes were read in
 
-    bytesRead = read(inputFD, buffer, BUFFER_SIZE);         
+    bytesRead = read(inputFD, buffer, BUFFER_SIZE);
+    if(bytesRead == 0){         //if file is empty, we can continue no further
+        printf("ERROR: File %d appears to contain zero bytes.\n", inputFD);
+        free(currWord);
+        return EXIT_FAILURE;
+    }         
     while(bytesRead > 0){
         for(i = 0; i < bytesRead; i++){                                 //iterate thru bytes read, one char at a time
             if(isspace(buffer[i])){     //if current char is whitespace
@@ -69,28 +73,22 @@ int normalize(int inputFD, int lineLength, int outputFD){
                     if(lineSpot == 0){                                  //if at the beginning of the line, write just the current token regardless of length
                         write(outputFD, currWord, strlen(currWord));
                         lineSpot += strlen(currWord);
-                    } else if(strlen(currWord) >= lineLength){          //if not currently at the beginning of a line & length of current token > line length, write it on its own line
-                        write(outputFD, "\n", 1);
-                        write(outputFD, currWord, strlen(currWord));
-                        write(outputFD, "\n", 1);
-                        seenTerminator = 1;
-                        lineSpot = 0;
                     } else if(lineSpot + 1 + strlen(currWord) <= lineLength){ //if not at the beginning of a line and the current word plus a space fits, add it to the current line
                         write(outputFD, " ", 1);
-                        write(outputFD, currWord, strlen(currWord));  //write currWord preceded by a space
+                        write(outputFD, currWord, strlen(currWord));    //write currWord preceded by a space
                         lineSpot += (1 + strlen(currWord));
-                    } else {
+                    } else {                                            //currWord does not fit at the end of the current line. start a new line
                         write(outputFD, "\n", 1);                       
                         write(outputFD, currWord, strlen(currWord));
-                        lineSpot = (1 + strlen(currWord));
+                        lineSpot = strlen(currWord);
                     }
                     if(buffer[i] == '\n'){
                         seenTerminator = 1;
                     } else {
                         seenTerminator = 0;
                     }
-                    memset(currWord, '\0', currWordSize);  //clear currWord and start a new word
-                } else if(buffer[i] == '\n' && paragraphFilled){       //if currWord is empty and the current paragraph contains non-whitespace characters, check if we need to start a new paragraph
+                    memset(currWord, '\0', currWordSize);           //clear currWord buffer and start a new word
+                } else if(buffer[i] == '\n' && paragraphFilled){    //if currWord is empty and the current paragraph contains non-whitespace characters, check if we need to start a new paragraph
                     if(seenTerminator){                 //if this is the second consecutive newline, we can start a new paragraph
                         write(outputFD, "\n\n", 2);
                         lineSpot = 0;
@@ -101,10 +99,10 @@ int normalize(int inputFD, int lineLength, int outputFD){
                 }
 
             } else {                                                //if the current character is non-whitespace, then we can add it to the write buffer
-                if(strlen(currWord) == (currWordSize - 1)){
-                    currWord = (char *)realloc(currWord, (currWordSize*2));
-                    currWordSize *= 2;
-                    memset((currWord + currWordSize/2), '\0', (currWordSize/2));
+                if(strlen(currWord) == (currWordSize - 1)){         //if adding a character will exceed string buffer (-1 for the final \0 character), 
+                    currWord = (char *)realloc(currWord, (currWordSize*2));   
+                    currWordSize *= 2;      //currWordSize will serve as an indicator for word > lineLength error
+                    memset((currWord + currWordSize/2), '\0', (currWordSize/2));   
                 }
                 paragraphFilled = 1;
                 currWord[strlen(currWord)] = (char)buffer[i];
@@ -118,27 +116,21 @@ int normalize(int inputFD, int lineLength, int outputFD){
     }
     //Need to print last word
     if(currWord[0] != '\0'){
-        if(strlen(currWord) >= lineLength){
-            write(outputFD, "\n", 1);
+        if(lineSpot == 0){                                        //if we're at the beginning of the line, just write the word
             write(outputFD, currWord, strlen(currWord));
-            write(outputFD, "\n", 1);
-            seenTerminator = 1;
-        } else if(lineSpot == 0){                                 //if we're at the beginning of the line
-            write(outputFD, currWord, strlen(currWord));
-        } else if(lineSpot + 1 + strlen(currWord) <= lineLength){ //need to have room for a space preceding the word
+        } else if(lineSpot + 1 + strlen(currWord) <= lineLength){ 
             write(outputFD, " ", 1);
-            write(outputFD, currWord, strlen(currWord));        //write currWord preceded by a space
-        } else {                                                  //if the word plus a space didn't fit, we need to start a new line
+            write(outputFD, currWord, strlen(currWord));          //write currWord preceded by a space
+        } else {                                                  //if the word plus a space didn't fit, we need to put it on a new line
             write(outputFD, "\n", 1);
             write(outputFD, currWord, strlen(currWord));
-            lineSpot = (1 + strlen(currWord));
         }
     }
 
     if(!seenTerminator)  //every file must end in a newline
         write(outputFD, "\n", 1);
 
-    if(currWordSize > (sizeof(char)*(lineLength + 1))){       //we had a word larger than a line
+    if(currWordSize > (sizeof(char)*(lineLength + 1))){       //we had a word larger than a line; need to error out
         printf("ERROR: File %d contains a word longer than specified line length.\n", inputFD);
         free(currWord);
         return EXIT_FAILURE;
@@ -165,11 +157,13 @@ int main(int argc, char const *argv[])
     */
     if(argc>1){
         for(int i = 0; i < strlen(argv[1]); i++){ //check if length argument is a number
-            if(!isdigit(argv[1][i])) // checking each digit individually
+            if(!isdigit(argv[1][i])){               // checking each digit individually
+                puts("ERROR: Invalid lineLength argument; must be an integer.");
                 return EXIT_FAILURE;
+            }
         }
     } else {
-        puts("Error: Not enough arguments passed in");
+        puts("ERROR: Not enough arguments given.");
         return EXIT_FAILURE;
     }
 
