@@ -36,77 +36,56 @@ char *getOutputName(char *output){
 }
 
 /*
+*   int inputFD: a file descriptor which points to source of input data,
+*   int lineLength: describes number of characters in a line for output formatting
+*   int outputFD: a file descriptor pointing to the file to write formatted input to
+*      (if NULL, outputs to STDOUT)
+*   
 *   Uses an input buffer to read data from input file fd,
 *   processes data from input buffer character-by-character,
 *   composing non-whitespace characters into words via output buffer,
 *   and then using whitespace characters as cues for writing words 
 *   or starting new paragraphs in the output file.
 */
-int normalize(int fd, int lineLength, char *output){
-    int outputFile = 1; // by default, output is to STDOUT
-
-    if(output != NULL){ // if we have a desired outputFile, switch to that
-        char *outputFilename = getOutputName(output);
-        outputFile = open(outputFilename, O_WRONLY|O_CREAT|O_TRUNC, 0700); // creating file if it does not exist with user RWX permissions
-        free(outputFilename); // frees outputFilename as it is no longer needed
-        if(outputFile <= 0){ // checking to see if open returned successfully 
-            puts("ERROR: Could not open/create desired output file.\n");
-            perror(outputFile);
-            return EXIT_FAILURE;
-        }
-    }
+int normalize(int inputFD, int lineLength, int outputFD){
     
     int lineSpot = 0;           //keeps track of the spot we are at in the current output file line
     int seenTerminator = 0;     //keeps track of consecutive newlines
     int paragraphFilled = 0;    //keeps track of if the current paragraph has any non-whitespace text in it yet
     int i;
 
-    char buffer[BUFFER_SIZE];                                           //buffer for data read from input
-    char *currWord = (char *)malloc(sizeof(char)*(lineLength + 1));     //buffer for words to write to output
-    int currWordSize = sizeof(char)*(lineLength + 1);                   //keep track of output buffer size
-    memset(currWord, '\0', currWordSize);
+    char buffer[BUFFER_SIZE];                                           //char array buffer for data read from input
+    char *currWord = (char *)malloc(sizeof(char)*(lineLength + 1));     //string buffer for words to write to output
+    int currWordSize = sizeof(char)*(lineLength + 1);                   //keep track of output buffer size for calculations & error-checking
+    memset(currWord, '\0', currWordSize);                               //initialize buffer with null chars (it is a string)
 
     int bytesRead; // variable keeping track of how many bytes were read in
 
     // creating a file descriptor to a temporary file
-    // by default it is set to the input file
-    int inputFD = fd;
+    // by default it is set to the inputFD
+    int inputFile = inputFD;
 
-    if(fd == 0){    //if we are reading from stdinput, store input in a temporary file
-        inputFD = fileno(tmpfile()); // creating inputID to be a temp file
-        bytesRead = read(fd, buffer, BUFFER_SIZE); // reading from standard input
-        while(bytesRead > 0){ // checking that bytes were read
-            write(inputFD, buffer, bytesRead); // writing the bytes read in as is
-            memset(buffer, '\0', sizeof(buffer)); // resetting the buffer for over-write scenarios
-            bytesRead = read(fd, buffer, BUFFER_SIZE); // getting the next set of bytes if there are any
-        }
-        close(fd); // closing input file since we're done with them
-        lseek(inputFD, 0, SEEK_SET); // setting the tmpfile offset back to the beginning of the file for writing
-        memset(buffer, '\0', sizeof(buffer)); // resetting buffer
-    }
-
-    bytesRead = read(inputFD, buffer, BUFFER_SIZE);
+    bytesRead = read(inputFile, buffer, BUFFER_SIZE);         
     while(bytesRead > 0){
-
-        for(i = 0; i < bytesRead; i++){
-            if(isspace(buffer[i])){     //current character is whitespace
+        for(i = 0; i < bytesRead; i++){                                 //iterate thru bytes read, one char at a time
+            if(isspace(buffer[i])){     //if current char is whitespace
                 if(currWord[0] != '\0'){
-                    if(lineSpot == 0){                                  //if we're at the beginning of the line
-                        write(outputFile, currWord, strlen(currWord));
+                    if(lineSpot == 0){                                  //if at the beginning of the line, write just the current token regardless of length
+                        write(outputFD, currWord, strlen(currWord));
                         lineSpot += strlen(currWord);
-                    } else if(strlen(currWord) >= lineLength){
-                        write(outputFile, "\n", 1);
-                        write(outputFile, currWord, strlen(currWord));
-                        write(outputFile, "\n", 1);
+                    } else if(strlen(currWord) >= lineLength){          //if not at the beginning of a line & length of current token > line length, write it on its own line
+                        write(outputFD, "\n", 1);
+                        write(outputFD, currWord, strlen(currWord));
+                        write(outputFD, "\n", 1);
                         seenTerminator = 1;
                         lineSpot = 0;
-                    } else if(lineSpot + 1 + strlen(currWord) <= lineLength){ //need to have room for a space preceding the word
-                        write(outputFile, " ", 1);
-                        write(outputFile, currWord, strlen(currWord));  //write currWord preceded by a space
+                    } else if(lineSpot + 1 + strlen(currWord) <= lineLength){ //if not at the b
+                        write(outputFD, " ", 1);
+                        write(outputFD, currWord, strlen(currWord));  //write currWord preceded by a space
                         lineSpot += (1 + strlen(currWord));
                     } else {
-                        write(outputFile, "\n", 1);
-                        write(outputFile, currWord, strlen(currWord));
+                        write(outputFD, "\n", 1);
+                        write(outputFD, currWord, strlen(currWord));
                         lineSpot = (1 + strlen(currWord));
                     }
                     if(buffer[i] == '\n'){
@@ -119,7 +98,7 @@ int normalize(int fd, int lineLength, char *output){
                 } else if(buffer[i] == '\n' && paragraphFilled){       //if currWord is empty and the current paragraph contains non-whitespace characters, check if we need to start a new paragraph
                     
                     if(seenTerminator){                 //if this is the second consecutive newline, we can start a new paragraph
-                        write(outputFile, "\n\n", 2);
+                        write(outputFD, "\n\n", 2);
                         lineSpot = 0;
                         seenTerminator = 0;
                         paragraphFilled = 0;
@@ -142,28 +121,28 @@ int normalize(int fd, int lineLength, char *output){
         // Only need to reset buffer to empty when bytes read will not completely overwrite
         memset(buffer, '\0', sizeof(buffer));
             
-        bytesRead = read(inputFD, buffer, BUFFER_SIZE);
+        bytesRead = read(inputFile, buffer, BUFFER_SIZE);
     }
     //Need to print last word
     if(currWord[0] != '\0'){
         if(strlen(currWord) >= lineLength){
-            write(outputFile, "\n", 1);
-            write(outputFile, currWord, strlen(currWord));
-            write(outputFile, "\n", 1);
+            write(outputFD, "\n", 1);
+            write(outputFD, currWord, strlen(currWord));
+            write(outputFD, "\n", 1);
         } else if(lineSpot == 0){                                 //if we're at the beginning of the line
-            write(outputFile, currWord, strlen(currWord));
+            write(outputFD, currWord, strlen(currWord));
         } else if(lineSpot + 1 + strlen(currWord) <= lineLength){ //need to have room for a space preceding the word
-            write(outputFile, " ", 1);
-            write(outputFile, currWord, strlen(currWord));        //write currWord preceded by a space
+            write(outputFD, " ", 1);
+            write(outputFD, currWord, strlen(currWord));        //write currWord preceded by a space
         } else {                                                  //if the word plus a space didn't fit, we need to start a new line
-            write(outputFile, "\n", 1);
-            write(outputFile, currWord, strlen(currWord));
+            write(outputFD, "\n", 1);
+            write(outputFD, currWord, strlen(currWord));
             lineSpot = (1 + strlen(currWord));
         }
     }
 
-    if(fd == 0)    //if we read from standard input, we must close the temporary file
-        close(inputFD);
+    //if(inputFD == 0)    //if we read from STDIN, we must close the temporary file used to process input
+        //close(inputFile);
 
     if(currWordSize > (sizeof(char)*(lineLength + 1))){       //we had a word larger than a line
         printf("ERROR: File %d contains a word longer than specified line length.\n", inputFD);
@@ -222,7 +201,8 @@ int main(int argc, char const *argv[])
                 puts("ERROR: Could not open directory.\n");
             }
             chdir(argv[2]); // Changing the working directory to have access to the files we need
-            
+
+            int outputFD;
             while ((dp = readdir(dr)) != NULL){ // while there are files to be read
 
                 // case where name of file is just a reference to current/parent directory
@@ -232,9 +212,18 @@ int main(int argc, char const *argv[])
         
                 // open the current file that we are on and work on it
                 fd = open(dp->d_name, O_RDONLY);
-                if(fd > 0){ // checking to see if file opened successfully
-                    if(normalize(fd, length, dp->d_name) == EXIT_FAILURE)
+                if(fd > 0 && dp->d_name){ // checking to see if file opened successfully
+                    char *outputFilename = getOutputName(dp->d_name);
+                    outputFD = open(outputFilename, O_WRONLY|O_CREAT|O_TRUNC, 0700);    // creating file if it does not exist with user RWX permissions
+                    free(outputFilename);                                        
+                    if(outputFD <= 0){                                                  // checking to see if open returned successfully 
+                        puts("ERROR: Could not open/create desired output file.\n");
+                        perror(outputFD);
+                        return EXIT_FAILURE;
+                    }
+                    if(normalize(fd, length, outputFD) == EXIT_FAILURE)
                         exitFlag = EXIT_FAILURE;
+                    close(outputFD);
                 }
                 // close file when we are done
                 close(fd);
@@ -243,17 +232,17 @@ int main(int argc, char const *argv[])
             free(dr);
         } else{ // file argument is a regular file
             fd = open(argv[2], O_RDONLY);
-            if(fd <= 0){ // checking to see if file is opened succesfully
+            if(fd <= 0){ // checking to see if file is opened successfully
                 puts("ERROR: Could not open file.\n");
                 return EXIT_FAILURE;
             }
             // reformatting file and assigning the result to return flag
-            exitFlag = normalize(fd, length, NULL);
+            exitFlag = normalize(fd, length, 1);
             close(fd);
         }
         // no file was passed in, reading from standard input
     } else if(argc==2){
-        normalize(0, length, NULL);
+        normalize(0, length, 1);
         return EXIT_FAILURE;
     } else { // fall through case when not enough arguments are passed
         puts("ERROR: Not enough arguments.\n");
