@@ -8,7 +8,7 @@
 #include <fcntl.h>
 #include <string.h>
 
-#define BUFFER_SIZE 16
+#define BUFFER_SIZE 1
 
 
 /*
@@ -50,7 +50,7 @@ char *getOutputName(char *output){
 int normalize(int inputFD, int lineLength, int outputFD){
     
     int lineSpot = 0;           //keeps track of the spot we are at in the current output file line
-    int seenTerminator = 0;     //keeps track of consecutive newlines
+    int seenTerminator = 0;     //keeps track of consecutive newlines; if the last character was a newline, seenTerminator = 1
     int paragraphFilled = 0;    //keeps track of if the current paragraph has any non-whitespace text in it yet
     int i;
 
@@ -58,14 +58,10 @@ int normalize(int inputFD, int lineLength, int outputFD){
     char *currWord = (char *)malloc(sizeof(char)*(lineLength + 1));     //string buffer for words to write to output
     int currWordSize = sizeof(char)*(lineLength + 1);                   //keep track of output buffer size for calculations & error-checking
     memset(currWord, '\0', currWordSize);                               //initialize buffer with null chars (it is a string)
-
+    
     int bytesRead; // variable keeping track of how many bytes were read in
 
-    // creating a file descriptor to a temporary file
-    // by default it is set to the inputFD
-    int inputFile = inputFD;
-
-    bytesRead = read(inputFile, buffer, BUFFER_SIZE);         
+    bytesRead = read(inputFD, buffer, BUFFER_SIZE);         
     while(bytesRead > 0){
         for(i = 0; i < bytesRead; i++){                                 //iterate thru bytes read, one char at a time
             if(isspace(buffer[i])){     //if current char is whitespace
@@ -73,18 +69,18 @@ int normalize(int inputFD, int lineLength, int outputFD){
                     if(lineSpot == 0){                                  //if at the beginning of the line, write just the current token regardless of length
                         write(outputFD, currWord, strlen(currWord));
                         lineSpot += strlen(currWord);
-                    } else if(strlen(currWord) >= lineLength){          //if not at the beginning of a line & length of current token > line length, write it on its own line
+                    } else if(strlen(currWord) >= lineLength){          //if not currently at the beginning of a line & length of current token > line length, write it on its own line
                         write(outputFD, "\n", 1);
                         write(outputFD, currWord, strlen(currWord));
                         write(outputFD, "\n", 1);
                         seenTerminator = 1;
                         lineSpot = 0;
-                    } else if(lineSpot + 1 + strlen(currWord) <= lineLength){ //if not at the b
+                    } else if(lineSpot + 1 + strlen(currWord) <= lineLength){ //if not at the beginning of a line and the current word plus a space fits, add it to the current line
                         write(outputFD, " ", 1);
                         write(outputFD, currWord, strlen(currWord));  //write currWord preceded by a space
                         lineSpot += (1 + strlen(currWord));
                     } else {
-                        write(outputFD, "\n", 1);
+                        write(outputFD, "\n", 1);                       
                         write(outputFD, currWord, strlen(currWord));
                         lineSpot = (1 + strlen(currWord));
                     }
@@ -94,13 +90,10 @@ int normalize(int inputFD, int lineLength, int outputFD){
                         seenTerminator = 0;
                     }
                     memset(currWord, '\0', currWordSize);  //clear currWord and start a new word
-                
                 } else if(buffer[i] == '\n' && paragraphFilled){       //if currWord is empty and the current paragraph contains non-whitespace characters, check if we need to start a new paragraph
-                    
                     if(seenTerminator){                 //if this is the second consecutive newline, we can start a new paragraph
                         write(outputFD, "\n\n", 2);
                         lineSpot = 0;
-                        seenTerminator = 0;
                         paragraphFilled = 0;
                     } else {                            //if this is the first consecutive newline, keep track of it
                         seenTerminator = 1;
@@ -121,7 +114,7 @@ int normalize(int inputFD, int lineLength, int outputFD){
         // Only need to reset buffer to empty when bytes read will not completely overwrite
         memset(buffer, '\0', sizeof(buffer));
             
-        bytesRead = read(inputFile, buffer, BUFFER_SIZE);
+        bytesRead = read(inputFD, buffer, BUFFER_SIZE);
     }
     //Need to print last word
     if(currWord[0] != '\0'){
@@ -129,6 +122,7 @@ int normalize(int inputFD, int lineLength, int outputFD){
             write(outputFD, "\n", 1);
             write(outputFD, currWord, strlen(currWord));
             write(outputFD, "\n", 1);
+            seenTerminator = 1;
         } else if(lineSpot == 0){                                 //if we're at the beginning of the line
             write(outputFD, currWord, strlen(currWord));
         } else if(lineSpot + 1 + strlen(currWord) <= lineLength){ //need to have room for a space preceding the word
@@ -141,8 +135,8 @@ int normalize(int inputFD, int lineLength, int outputFD){
         }
     }
 
-    //if(inputFD == 0)    //if we read from STDIN, we must close the temporary file used to process input
-        //close(inputFile);
+    if(!seenTerminator)  //every file must end in a newline
+        write(outputFD, "\n", 1);
 
     if(currWordSize > (sizeof(char)*(lineLength + 1))){       //we had a word larger than a line
         printf("ERROR: File %d contains a word longer than specified line length.\n", inputFD);
@@ -159,7 +153,7 @@ int main(int argc, char const *argv[])
 {
 
     int fd = -1; // File pointer
-    DIR *dr = -1; // Directory pointer
+    DIR *dr = NULL; // Directory pointer
     struct stat statbuf; // Holds file information to determine its type
     struct dirent *dp;  // Temp variable to hold individual temp entries
     int err; // Variable to store error information
@@ -218,7 +212,7 @@ int main(int argc, char const *argv[])
                     free(outputFilename);                                        
                     if(outputFD <= 0){                                                  // checking to see if open returned successfully 
                         puts("ERROR: Could not open/create desired output file.\n");
-                        perror(outputFD);
+                        perror("outputFD");
                         return EXIT_FAILURE;
                     }
                     if(normalize(fd, length, outputFD) == EXIT_FAILURE)

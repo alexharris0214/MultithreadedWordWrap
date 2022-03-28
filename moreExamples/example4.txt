@@ -1,14 +1,1 @@
-hi my name is alex
-and
-i dont
-like programming in C
-
-just kidding, my name is not Alex!
-
-it is Maxim
-
-but...
-I do still hate programming
-in this tedious
-fucking
-language
+i
