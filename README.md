@@ -2,8 +2,7 @@
 - CS214
 - Group 39
 # Authors
-- Maxim Yacun and Alexander Harris
-- NETID: my405 --- NETID: ajh273
+- Maxim Yacun (NETID: my405) and Alexander Harris (NETID: ajh273)
 
 # Design
 ### Reading Inputs: ###
@@ -17,7 +16,24 @@
 - In the scenario where we have two additional program arguments and the second argument is a regular file, we will make the following call to normalize "normalize(fd, argv[1], 1)", the inputFD parameter is set to be fd, which is the name of the file descriptor corresponding to the name of the input file, given by argv[2], on which we call open on and assign to the value of fd. We are still writing to standard output, so outfd is set to be 1.
 -  In the scenario where we have two additional program arguments and the second argument is a directory file, we will make the following call to normalize "normalize(fd, argv[1], outputFD)". These are a series of calls that are done within a while loop, where the condition is there are more directory entries to be read. First, we create a direcotry pointer and assigin it to dr using opendr. Then, while there are more directory entries to be read, use open on each individual file that is not ".", "..", or a file containing the prefix "wrap". Each file is then assigned a file descrptor fd using open, and then passed to the normalize function one at a time. The outputFD descitor is created accoding to each file inputs name. It is created/opened with the open functin, with the O_CREATE parameter passed in the situration where it has not yet been made, and is created with prefix "wrap." before the input file's name.
 
-#Normalize Method
+### Normalize Method ###
+- The general stucture of normalize is to:
+  -  Read the file's contents at a certain set of bytes at a time 
+  -  Store the bytes read in in a buffer
+  -  Parse the buffer and recognize special characters such as white space and newlines
+  -  Store the non white space characters in a currentWord variable to process words between reads
+  -  Write to the output file once currentword contains the complete word
+  -  Repeat until there are no more bytes to process
+  -  Close all open files
+  -  Return with appropiate return flag
 
+- Our buffer is set to be a default of 16, defined as macro BUF_SIZE, but this can work with any size buffer
+- We start off by first initalizing/declaring variable such as currword, which will hold our current word, and buffer to contain that read has gotten
+- A initial call to read is called first to see if there are bytes to be read in the first place, which is then stored in the buffer
+- We then enter our main loop that continues as long as read does not return 0
+- The buffer is then iterated over one at a time, and each character is checked to be either a non-whitespace character, a whitespace character, or a newline character
+  - In the situation where we have a non-whitepsace character, we
+  - In the situation where we have a whitespace character, we
+  - In the situation where we have a newline character, we
 # Test Plan
 
