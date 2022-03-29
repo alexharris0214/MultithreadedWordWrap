@@ -50,7 +50,7 @@ int normalize(int inputFD, int lineLength, int outputFD){
     
     int lineSpot = 0;           //keeps track of the spot we are at in the current output file line
     int seenTerminator = 0;     //keeps track of consecutive newlines; if the last character was a newline, seenTerminator = 1
-    int paragraphFilled = 0;    //keeps track of if the current paragraph has any non-whitespace text in it yet
+    int newPG = 0;              //keeps track of when to start a new paragraph before writing a new word
     int i;
 
     char buffer[BUFFER_SIZE];                                           //char array buffer for data read from input
@@ -62,16 +62,17 @@ int normalize(int inputFD, int lineLength, int outputFD){
 
     bytesRead = read(inputFD, buffer, BUFFER_SIZE);
     if(bytesRead == 0){         //if file is empty, we can continue no further
-        printf("ERROR: File %d appears to contain zero bytes.\n", inputFD);
+        puts("ERROR: Input appears to contain zero bytes.");
         free(currWord);
         return EXIT_FAILURE;
     }         
     while(bytesRead > 0){
-        for(i = 0; i < bytesRead; i++){                                 //iterate thru bytes read, one char at a time
-            if(isspace(buffer[i])){     //if current char is whitespace
+        for(i = 0; i < bytesRead; i++){         //iterate thru bytes read, one char at a time
+            if(isspace(buffer[i])){ 
+
                 if(buffer[i] == '\n'){
-                    if(seenTerminator && !paragraphFilled){
-                        write(outputFD, "\n\n", 2);
+                    if(seenTerminator){
+                        newPG = 1;
                         lineSpot = 0;
                     } else {
                         seenTerminator = 1;
@@ -79,7 +80,12 @@ int normalize(int inputFD, int lineLength, int outputFD){
                 } else {
                     seenTerminator = 0;
                 }
-                if(currWord[0] != '\0'){
+
+                if(currWord[0] != '\0'){        // go on to write currWord to output on reaching whitespace if currWord is non-empty
+                    if(newPG){   //start a new paragraph before the next word is written if needed
+                        write(outputFD, "\n\n", 2);
+                        newPG = 0;
+                    }
                     if(lineSpot == 0){                                  //if at the beginning of the line, write just the current token regardless of length
                         write(outputFD, currWord, strlen(currWord));
                         lineSpot += strlen(currWord);
@@ -92,18 +98,9 @@ int normalize(int inputFD, int lineLength, int outputFD){
                         write(outputFD, currWord, strlen(currWord));
                         lineSpot = strlen(currWord);
                     }
-                    paragraphFilled = 1;
                     memset(currWord, '\0', currWordSize);           //clear currWord buffer and start a new word
                 }
-                /*} else if(buffer[i] == '\n' && paragraphFilled){    //if currWord is empty and the current paragraph contains non-whitespace characters, check if we need to start a new paragraph
-                    if(seenTerminator){                 //if this is the second consecutive newline, we can start a new paragraph
-                        write(outputFD, "\n\n", 2);
-                        lineSpot = 0;
-                        paragraphFilled = 0;
-                    } else {                            //if this is the first consecutive newline, keep track of it
-                        seenTerminator = 1;
-                    }
-                }*/
+
             } else {                                                //if the current character is non-whitespace, then we can add it to the write buffer
                 seenTerminator = 0;
                 if(strlen(currWord) == (currWordSize - 1)){         //if adding a character will exceed string buffer (-1 for the final \0 character), 
@@ -114,14 +111,15 @@ int normalize(int inputFD, int lineLength, int outputFD){
                 currWord[strlen(currWord)] = (char)buffer[i];
             }
         }
-        // Resetting the buffer before we reassign to it
-        // Only need to reset buffer to empty when bytes read will not completely overwrite
+        // Resetting the buffer before reassigning to it
         memset(buffer, '\0', sizeof(buffer));
             
         bytesRead = read(inputFD, buffer, BUFFER_SIZE);
     }
-    //Need to print last word
+    //Need to print last word after program is finished reading input
     if(currWord[0] != '\0'){
+        if(newPG)   //start a new paragraph before the next word is written if needed
+            write(outputFD, "\n\n", 2);
         if(lineSpot == 0){                                        //if we're at the beginning of the line, just write the word
             write(outputFD, currWord, strlen(currWord));
         } else if(lineSpot + 1 + strlen(currWord) <= lineLength){ 
@@ -137,7 +135,7 @@ int normalize(int inputFD, int lineLength, int outputFD){
     write(outputFD, "\n", 1);
 
     if(currWordSize > (sizeof(char)*(lineLength + 1))){       //we had a word larger than a line; need to error out
-        printf("ERROR: File %d contains a word longer than specified line length.\n", inputFD);
+        puts("ERROR: Input contains a word longer than specified line length.");
         free(currWord);
         return EXIT_FAILURE;
     }
