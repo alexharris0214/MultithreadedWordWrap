@@ -27,13 +27,22 @@
   -  Close all open files
   -  Return with appropiate return flag
 
-- Our buffer is set to be a default of 16, defined as macro BUF_SIZE, but this can work with any size buffer
+- Our buffer is set to be a default of 16, defined as macro BUFF_SIZE, but this can work with any size buffer
 - We start off by first initalizing/declaring variable such as currword, which will hold our current word, and buffer to contain that read has gotten
 - A initial call to read is called first to see if there are bytes to be read in the first place, which is then stored in the buffer
 - We then enter our main loop that continues as long as read does not return 0
 - The buffer is then iterated over one at a time, and each character is checked to be either a non-whitespace character, a whitespace character, or a newline character
-  - In the situation where we have a non-whitepsace character, we
-  - In the situation where we have a whitespace character, we
-  - In the situation where we have a newline character, we
+  - In the situation where we have a non-whitepsace character, we will add this value to currWord
+  - In the situation where we have a whitespace character, we will write the contents of currWord to the file, preceeded by a white space character
+  - In the situation where we have a newline character, we will not that we have seen a new line character, and if the next character in the buffer/future buffer is also a new line, we recognize this as a paragraph scenario. Otherwise, we will ignore this new line character
+- If the currWord exceed's the line length, double the size of currWord and note that we have a word that exceeds the line length
+- CONTINUE HERE
 # Test Plan
+- Our test plan cosists of the following files: Example1.txt, Example2.txt, and a moreExample directory containing
+  - Example3.txt
+  - Example4.txt
+  - Example5.txt
+  - Example6.txt
+- In Example1.txt, we check a single paragraph with multiple lines, where no line has more than one consecutive white space characters. This is the normal base case.
+- In Example2.txt, we check multiple paragraphs that contain some lines that are preceeded with more than white space characters. This checks the edge case where we have new paragraphs beginning with white space, and new lines within a paragraph that are preceeded with white space. The program shuold and succesfully does ignore this white space, and starts by searching for the next word, while having currWord be empty.
 
