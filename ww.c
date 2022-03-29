@@ -69,6 +69,16 @@ int normalize(int inputFD, int lineLength, int outputFD){
     while(bytesRead > 0){
         for(i = 0; i < bytesRead; i++){                                 //iterate thru bytes read, one char at a time
             if(isspace(buffer[i])){     //if current char is whitespace
+                if(buffer[i] == '\n'){
+                    if(seenTerminator && !paragraphFilled){
+                        write(outputFD, "\n\n", 2);
+                        lineSpot = 0;
+                    } else {
+                        seenTerminator = 1;
+                    }
+                } else {
+                    seenTerminator = 0;
+                }
                 if(currWord[0] != '\0'){
                     if(lineSpot == 0){                                  //if at the beginning of the line, write just the current token regardless of length
                         write(outputFD, currWord, strlen(currWord));
@@ -82,13 +92,10 @@ int normalize(int inputFD, int lineLength, int outputFD){
                         write(outputFD, currWord, strlen(currWord));
                         lineSpot = strlen(currWord);
                     }
-                    if(buffer[i] == '\n'){
-                        seenTerminator = 1;
-                    } else {
-                        seenTerminator = 0;
-                    }
+                    paragraphFilled = 1;
                     memset(currWord, '\0', currWordSize);           //clear currWord buffer and start a new word
-                } else if(buffer[i] == '\n' && paragraphFilled){    //if currWord is empty and the current paragraph contains non-whitespace characters, check if we need to start a new paragraph
+                }
+                /*} else if(buffer[i] == '\n' && paragraphFilled){    //if currWord is empty and the current paragraph contains non-whitespace characters, check if we need to start a new paragraph
                     if(seenTerminator){                 //if this is the second consecutive newline, we can start a new paragraph
                         write(outputFD, "\n\n", 2);
                         lineSpot = 0;
@@ -96,15 +103,14 @@ int normalize(int inputFD, int lineLength, int outputFD){
                     } else {                            //if this is the first consecutive newline, keep track of it
                         seenTerminator = 1;
                     }
-                }
-
+                }*/
             } else {                                                //if the current character is non-whitespace, then we can add it to the write buffer
+                seenTerminator = 0;
                 if(strlen(currWord) == (currWordSize - 1)){         //if adding a character will exceed string buffer (-1 for the final \0 character), 
                     currWord = (char *)realloc(currWord, (currWordSize*2));   
                     currWordSize *= 2;      //currWordSize will serve as an indicator for word > lineLength error
                     memset((currWord + currWordSize/2), '\0', (currWordSize/2));   
                 }
-                paragraphFilled = 1;
                 currWord[strlen(currWord)] = (char)buffer[i];
             }
         }
@@ -127,8 +133,8 @@ int normalize(int inputFD, int lineLength, int outputFD){
         }
     }
 
-    if(!seenTerminator)  //every file must end in a newline
-        write(outputFD, "\n", 1);
+    //every file must end in a newline
+    write(outputFD, "\n", 1);
 
     if(currWordSize > (sizeof(char)*(lineLength + 1))){       //we had a word larger than a line; need to error out
         printf("ERROR: File %d contains a word longer than specified line length.\n", inputFD);
