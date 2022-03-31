@@ -197,8 +197,8 @@ int main(int argc, char const *argv[])
             int outputFD;
             while ((dp = readdir(dr)) != NULL){ // while there are files to be read
 
-                // case where name of file is just a reference to current/parent directory
-                if(strcmp(dp->d_name, "..") ==0 || strcmp(dp->d_name, ".") ==0 || strstr(dp->d_name, "wrap") != NULL){
+                //ignoring files which start with "." or "wrap."
+                if(strstr(dp->d_name, ".") == dp->d_name || strstr(dp->d_name, "wrap.") == dp->d_name){
                     continue;
                 }
         
@@ -213,7 +213,7 @@ int main(int argc, char const *argv[])
                         perror("outputFD");
                         return EXIT_FAILURE;
                     }
-                    if(normalize(fd, length, outputFD) == EXIT_FAILURE)
+                    if(normalize(fd, length, outputFD) == EXIT_FAILURE)     //save exit status to return later, as the program still needs to process the rest of the directory
                         exitFlag = EXIT_FAILURE;
                     close(outputFD);
                 }
