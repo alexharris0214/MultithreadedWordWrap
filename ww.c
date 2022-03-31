@@ -11,10 +11,9 @@
 #define BUFFER_SIZE 16
 
 /*
-* char *output: a string containing a filename which needs to be written to
+* char *output: a string containing a filename which needs an output file to write to
 *
-* Returns a string with the prefix "wrap." placed 
-* in front of the string passed in the parameter output.
+* Returns a string with the prefix "wrap." in front of the string passed to the char *output parameter.
 */
 char *getOutputName(char *output){
     char *outputFileName = (char *)malloc(sizeof(output) + 5); // 5 is hardcoded to be length of "wrap." (5 character)
@@ -85,6 +84,7 @@ int normalize(int inputFD, int lineLength, int outputFD){
                     if(newPG){   //start a new paragraph before the next word is written if needed
                         write(outputFD, "\n\n", 2);
                         newPG = 0;
+                        lineSpot = 0;
                     }
                     if(lineSpot == 0){                                  //if at the beginning of the line, write just the current token regardless of length
                         write(outputFD, currWord, strlen(currWord));
@@ -118,8 +118,10 @@ int normalize(int inputFD, int lineLength, int outputFD){
     }
     //Need to print last word after program is finished reading input
     if(currWord[0] != '\0'){
-        if(newPG)   //start a new paragraph before the next word is written if needed
+        if(newPG){   //start a new paragraph before the next word is written if needed
             write(outputFD, "\n\n", 2);
+            lineSpot = 0;
+        }
         if(lineSpot == 0){                                        //if we're at the beginning of the line, just write the word
             write(outputFD, currWord, strlen(currWord));
         } else if(lineSpot + 1 + strlen(currWord) <= lineLength){ 
