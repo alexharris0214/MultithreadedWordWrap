@@ -15,47 +15,63 @@
   - int inputFD (the file descriptor for the input file)
   - int lineLength (the size that our lines should be wrapped to)
   - int outputID (the file descriptor of our output file)
-- In the scenario where only the line length is provided to our program, we will make the following call to normalize "normalize(0, argv[1], 1)" the inputFD parameter is set to 0, as this refers to the file descriptor for standard input, which is where the data that will be wrapped will be stored. The line length parameter is set to be the second argument in our argv list, since argv[0] contains the name of our program. Finally, outputFD is set to 1, since this is the file descriptor for standard output
-- In the scenario where we have two additional program arguments and the second argument is a regular file, we will make the following call to normalize "normalize(fd, argv[1], 1)", the inputFD parameter is set to be fd, which is the name of the file descriptor corresponding to the name of the input file, given by argv[2], on which we call open on and assign to the value of fd. We are still writing to standard output, so outfd is set to be 1.
--  In the scenario where we have two additional program arguments and the second argument is a directory file, we will make the following call to normalize "normalize(fd, argv[1], outputFD)". These are a series of calls that are done within a while loop, where the condition is there are more directory entries to be read. First, we create a directory pointer and assign it to dr using opendr. Then, while there are more directory entries to be read, use open on each individual file that is not ".", "..", or a file containing the prefix "wrap". Each file is then assigned a file descriptor fd using open, and then passed to the normalize function one at a time. The outputFD descriptor is created according to each file input's name. It is created/opened with the open function, with the O_CREATE parameter passed in the situation where it has not yet been made and is created with the prefix "wrap." before the input file's name.
+- In the scenario where only the line length is provided to our program, we will make the following call to normalize: "normalize(0, argv[1], 1);". The inputFD parameter is set to 0, as this refers to the file descriptor for standard input as a source. The line length parameter is set to be the second argument in our argv list (argv[1]), since argv[0] contains the name of our program. Finally, outputFD is set to 1, since this is the file descriptor for standard output.
+- In the scenario where there are two arguments given to the program and the second argument is a regular file, we will make the following call to normalize: "normalize(fd, argv[1], 1);". Before calling normalize(), open is called on the input file given in argv[2] and assigned to fd. This scenario still requires writing to standard output, so outputFD is set to 1.
+-  In the scenario there are two arguments provided and the second argument is a directory file, we will make the following call to normalize: "normalize(fd, argv[1], outputFD)". This is done serially within a while loop with each file in the directory provided by argv[2]. First, we create a directory pointer and assign it to dr using opendr. Then, while there are more directory entries to be read, use open on each filename if it does not start with "." or "wrap." (if it does, move on to the next filename). The file is then assigned a file descriptor fd using open, and then passed to the normalize function one at a time as above. The outputFD descriptor is assigned to a file with the same filename as the input file but with the prefix "wrap.", using a helper function getOutputName(filename). The new output filename returned from getOutputName is passed to the open function using the O_CREATE flag (for the situation where it has not yet been made) to get the file descriptor passed to outputFD.
 
 ### Normalize Method ###
 - The general structure of normalize is to:
-  -  Read the file's contents at a certain set of bytes at a time 
-  -  Store the bytes read in a buffer
-  -  Parse the buffer and recognize special characters such as white space and newlines
-  -  Store the nonwhite space characters in a currentWord variable to process words between reads
-  -  Write to the output file once currentword contains the complete word
-  -  Repeat until there are no more bytes to process
-  -  Close all open files
-  -  Return with the appropriate return flag
+  -  Read the file's contents to a buffer, BUFFER_SIZE bytes at a time 
+  -  Parse the buffer character-by-character and recognize special characters such as white space and newlines
+    - Store the non-whitespace characters in a write buffer called currWord (to allow storage of words which span calls of read())
+    - Each time a whitespace character is reached (i.e. the end of a "word"), 
+      - Start a new paragraph if needed by writing two consecutive newlines to the output file (the need for this is kept track of using a variable newPG)
+      - For words not at the beginning of a new line, write a single space to output
+      - For words which will not fit at the end of the current output file line, write a single newline to output
+      - Finally, write the output buffer currWord to the output file
+  -  Repeat until read returns no more bytes to process
+  -  If there is a final word left in the currWord buffer, such as a file which ends in a non-whitespace character, write it to output with the necessary whitespace
+  -  Return with EXIT_FAILURE if a word was too long to fit in a line or the input file was empty, return with EXIT_SUCCESS otherwise
 
-- Our buffer is set to be a default of 16, defined as macro BUFF_SIZE, but this can work with any size buffer
-- We start off by first initializing/declaring variable such as currWord, which will hold our current word, and buffer to contain that read has gotten
-- A initial call to read is called first to see if there are bytes to be read in the first place, which is then stored in the buffer
-- We then enter our main loop that continues as long as read does not return 0
-- The buffer is then iterated over one at a time, and each character is checked to be either a non-whitespace character, a whitespace character, or a newline character
+
+- Our read buffer is set to be a default of 16, defined as a macro with the name BUFFER_SIZE, but this works with any size buffer
+- Any whitespace written to output is always written immediately before a new word is written. 
+  - This was a deliberate choice which makes it easier to prevent spaces without words after them or empty paragraphs from being written to the output file.
+  - Although the program moves through the buffer character-by-character, the necessary trackers are made to note the current spot in a given line in the output file, consecutive newline characters, or when a new paragraph needs to be started before the next write of a word. All of these are used to ensure text is properly normalized to the lineLength parameter and has spaces only between words and exclusively 1-2 newline characters between lines.
+- We start off by first initializing/declaring variables such as currWord (the write buffer), trackers for important characters in input and current location in output, and a buffer to contain what read has gotten from input
+  - The currWord buffer is initially the size of line length + 1 (extra \0 character at the end to allow for strlen() functionality).
+    - currWord's size is doubled to accomodate consecutive non-whitespace characters exceeding the length of a line 
+    - therefore, size of currWord later denotes whether there was a word that exceeds the line length
+- An initial call to read is done first to see if there are any bytes to be read from input, which is then stored in the buffer
+- We then enter our main loop that continues as long as read gets back more than 0 bytes
+- The buffer is then iterated over one at a time, and each character is checked to be either a non-whitespace character or a whitespace character (with newlines as a special subset of whitespace)
   - In the situation where we have a non-whitespace character, we will add this value to currWord
-  - In the situation where we have a whitespace character, we will write the contents of currWord to the file, preceded by a white space character
-  - In the situation where we have a newline character, we will not that we have seen a new line character, and if the next character in the buffer/future buffer is also a new line, we recognize this as a paragraph scenario. Otherwise, we will ignore this new line character
-- If the currWord exceeds the line length, double the size of currWord and note that we have a word that exceeds the line length
-- CONTINUE HERE
-# Test Plan
-- Our test plan consists of the following files: Example1.txt, Example2.txt, and a moreExample directory containing
-  - Example1.txt
-  - Example2.txt
-  - Example3.txt
-  - Example4.txt
-  - Example5.txt
-- In Example1.txt, we check a single paragraph with multiple lines, where no line has more than one consecutive white space characters. This is the normal base case.
-- In Example2.txt, we check multiple paragraphs that contain some lines that are preceded with more than white space characters. This checks the edge case where we have new paragraphs beginning with white space, and newlines within a paragraph that are preceded with white space. The program should and successfully does ignore this white space, and starts by searching for the next word while having currWord be empty.
-- Withing our moreExample directory, we first and foremost test the functionality of the directoy feature, but within each example file we test various different edge cases. The following test cases lie within this directory
-  - In example1.txt, we contain a base case where we have a single paragraph with multiple lines, where each word is separated by a single whitespace character. This is done to check if the normal case works for both the single file mode and directory mode.
-  - In example2.txt, We have multiple paragraphs with randomly generated Lorem Ipsum text. Some of these paragraphs contain lines where the beginning of the line is a series of whitespace characters, and we also have lines that are triple to quadruple the line length of other lines to test that our function works with varying line lengths of drastic degrees.
-  - In example3.txt, we have a scenario where the start of the file is a series of newline characters. The program is expected to ignore these characters and wait until we have a valid non-whitespace character, which it does successfully. Furthermore, the end of file is preceded by a series of consecutive newline characters, which our program successfully ignores.
-  - In example4.txt, we have a single non-whitespace character in our file (not including the newline terminator). Our program should be expected the recognize single lines as its own paragraph, and is expected to print a new line after the line ends, which it successfully does so.
-  - In example5.txt, we have an empty file. Despite a line being there (the presence of a new line character), our program should not recognize this as a valid line/paragraph, and not print out a new line, which it successfully does so.
+  - In the situation where we have a whitespace character, we will write the contents of currWord to the file, preceded by a space character
+  - In the situation where we have a newline character, we will note that we have seen a new line character, and if the next character in the buffer/future buffer is also a new line, we recognize this as a paragraph scenario with the tracker newPG. Otherwise, we will ignore this new line character
+   - When there is another word to be written to output, newPG will signify to start a new paragraph before writing this new word.
 
-- In addition to files we have manually created, we also test with standard input as our source file. All of the edge cases that previous test cases have covered in previous test cases (excluding paragraphs and line breaks since we cannot test them within standard input), have been tested with standard input. Each line that is entered is immediately wrapped and outputted to standard output. The command prompt then waits for more bytes to be written to standard input, until EOF is signified to standard input.
-- To verify differences in white spacing where the contents of each paragraph is the same, we created two outputs files, "output1.txt" and "output2.txt", and piped the output from each test case with two different versions of white spacing. We then used cmp to find any differences in the files, and no differences were returned by cmp, verifying that whitespace is being handled correctly.
-- Finally, the output of one file was then put back into our program to see if any changes were made to that file. We once again did this using "output1.txt" and "output2.txt", and used cmp on the output of the first file, and the output of the first file was used as an input.
+# Test Plan
+Overall, the test plan first involves three major I/O cases: STDIN to STDOUT, file to STDOUT, and directory to files
+  - We run the program in all three of these cases (for the first, simply piping example1.txt or example2.txt to STDIN and comparing to the second case) to ensure our file I/O is working properly
+
+Beyond trying different line length arguments, the test plan also involves a variety of formats for input text to ensure our normalizing function properly.
+- Our test plan consists of the following files: example1.txt, example2.txt, and a moreExample directory containing
+  - .example0.txt
+  - example1.txt
+  - example2.txt
+  - example3.txt
+  - example4.txt
+  - example5.txt
+- In example1.txt, we check a single paragraph with multiple lines, where no line has more than one consecutive white space character. This is an easy case where not much formatting is required beyond normalizing to the line length.
+- In example2.txt, we check multiple paragraphs that contain some lines which are preceded by many white space characters. This checks the case where we have new paragraphs beginning with white space (such as a Tab indent) in the input to ensure our program ignores this. As well, it checks that newlines within a paragraph that are preceded with white space properly start with non-whitespace characters in the output.
+- With our moreExample directory, we first and foremost test the functionality of the directory feature, but within each example file we test various different edge cases. The following test cases lie within this directory
+  - .example0.txt: this is the same file as example4.txt, except it has a prefix of "." to ensure our program properly skips over files with this prefix
+  - example1.txt: this is the same file as example1.txt explained above
+  - example2.txt: this is the same file as example2.txt explained above
+  - example3.txt: this file contains a very long word which serves as an easy test for when a word is longer than the given line length. Furthermore, it contains a large number of whitespace characters (spaces, tabs, and newlines) before and after paragraphs to ensures that the program properly normalizes paragraphs to always start with non-whitespace. Multiple newlines after the final paragraph makes sure the program properly ignores these and the output ends with exactly one newline character.
+  - example4.txt: a single non-whitespace character in our file. this tests the extreme minimum for output file size, which the assignment specifies should be two bytes; a non-whitespace character followed by a newline.
+  - example5.txt: an empty file. As the assignment does not specify the exact behavior in this scenario, it was our decision to make the program create an output file that is also empty and this tests that our program successfully does that.
+
+- In addition to files we have manually created, we also test with standard input as our source file. All of the edge cases that previous test cases have covered in previous test cases (excluding paragraphs and line breaks since we cannot test them within standard input), have been tested with standard input. Each line that is entered is immediately wrapped and outputted to standard output (this behavior is exactly as seen in a class demonstration of the professor's working version of WordWrap). The command prompt then waits for more bytes to be written to standard input until EOF is signified to standard input with CTRL + D.
+- To verify differences in white spacing where the contents of non-whitespace is the same, we create two input files "example1.txt" and "example1B.txt" with two different versions of white space. We use STDOUT to pipe the output from each test case to files named "output1.txt" and "output2.txt". We then use cmp to verify the program is writing the same output in both cases.
+- Finally, To verify an edge case where an already-formatted file is passed to the program, we used file to STDOUT I/O with example2.txt as input and STDOUT piped to a file named output1.txt. The program is then run one more time with output1.txt as input and STDOUT piped to a file named output2.txt. The program "cmp" is then run with output1.txt and output2.txt as parameters to ensure that these files are exactly the same. 
