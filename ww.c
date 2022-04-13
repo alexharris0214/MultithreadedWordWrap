@@ -7,8 +7,28 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <string.h>
+#include <pthread.h>
 
 #define BUFFER_SIZE 16
+
+struct pathName {
+    char *prefix;
+    char *fileName;
+};
+
+struct node {
+    struct pathName path;
+    struct node *next;
+};
+
+struct queue {
+    struct node *start;
+    struct node *end;
+    pthread_mutex_t lock;
+    pthread_cond_t dequeue_ready;
+} *fileQueue, *dirQueue;
+
+int activeDThreads = 0;
 
 /*
 * char *output: a string containing a filename which needs an output file to write to
@@ -146,6 +166,65 @@ int normalize(int inputFD, int lineLength, int outputFD){
     return EXIT_SUCCESS;
 }
 
+void enqueue(struct queue *queue, struct pathName file){
+    pthread_mutex_lock(&queue->lock);
+
+        //malloc new node for the queue
+        //set next of new node to null
+        //set queue->end->next to new node
+        //set queue->end to new node
+
+    pthread_mutex_unlock(&queue->lock);
+    return;
+}
+
+struct pathName dequeue(struct queue *queue){
+    pthread_mutex_lock(&queue->lock);
+
+        //cond_wait for dequeue->ready
+        //set a temp value to current queue->start ; we will use this temp value to return later
+        //set queue->start to temp->next
+        //save pathname of temp
+        //free temp
+
+    pthread_mutex_unlock(&queue->lock);
+
+    return; //return pathname of temp
+}
+
+void *fileWorker(void * arg){
+
+    /* while(!activeDThreads || queue is not empty){
+         block until fileQueue has stuff in it
+
+         struct pathName currFile = dequeue(fileQueue);
+
+         fd = open(currFile->prefix + currFile->fileName, O_RDONLY);
+         if(fd <= 0){ // checking to see if file is opened successfully
+            puts("ERROR: Could not open file.\n");
+             return EXIT_FAILURE;
+         }
+         // reformatting file
+         normalize(fd, arg, 1); //FIXME: make global exit status with mutex to keep track of normalize() exit status
+         close(fd);
+        }
+    */
+}
+
+void *dirWorker(void * arg){
+    /* while(!dirQueue->start == NULL || activeDThreads){
+            block until dirQueue has stuff in it
+            
+            increment activeDThreads
+
+            dequeue a directory
+            
+            enqueue directories and files in that directory (as in main)
+
+            decrement activeDThreads
+        }
+    */  
+}
 
 int main(int argc, char const *argv[])
 {
