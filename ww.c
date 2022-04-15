@@ -16,10 +16,10 @@ struct pathName {
     char *fileName;
 };
 
-struct node {
+typedef struct node {
     struct pathName path;
     struct node *next;
-};
+} node;
 
 struct queue {
     struct node *start;
@@ -166,13 +166,34 @@ int normalize(int inputFD, int lineLength, int outputFD){
     return EXIT_SUCCESS;
 }
 
+
+void init_queue(struct queue *queue){
+    queue->start = NULL;
+    queue->end = NULL;
+}
+
 void enqueue(struct queue *queue, struct pathName *file){
     pthread_mutex_lock(&queue->lock);
 
-        //malloc new node for the queue
-        //set next of new node to null
-        //set queue->end->next to new node
-        //set queue->end to new node
+        node *temp = malloc(sizeof(node));
+
+        // checking to see if malloc returned correctly
+        if(temp == NULL){
+            return EXIT_FAILURE;
+        }
+        // allocating new node (temp) accordingly
+        temp->path = *file;
+        temp->next = NULL;
+        
+        // if the end exists, attach the new node to the next pointer of end
+        if(queue->end != NULL){
+            queue->end->next = temp;
+        }
+        queue->end = temp; // change the end to point to the new node
+
+        if(queue->start == NULL){ // make sure that head always points to something if data exists
+            queue->start  = temp;
+        }
 
     pthread_mutex_unlock(&queue->lock);
     return;
@@ -186,6 +207,17 @@ struct pathName dequeue(struct queue *queue){
         //set queue->start to temp->next
         //save pathname of temp
         //free temp
+
+        if(queue->start != NULL){
+            node *tmp = queue->start;
+            struct pathName path = tmp->path;
+            queue->start = queue->start->next;
+            if(queue->start == NULL){
+                queue->end = NULL;
+            }
+            free(tmp);
+            return path;
+        }
 
     pthread_mutex_unlock(&queue->lock);
 
