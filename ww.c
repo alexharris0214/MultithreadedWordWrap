@@ -166,7 +166,7 @@ int normalize(int inputFD, int lineLength, int outputFD){
     return EXIT_SUCCESS;
 }
 
-void enqueue(struct queue *queue, struct pathName file){
+void enqueue(struct queue *queue, struct pathName *file){
     pthread_mutex_lock(&queue->lock);
 
         //malloc new node for the queue
@@ -226,11 +226,34 @@ void *dirWorker(void * arg){
     */  
 
    while(dirQueue->start == NULL || activeDThreads > 0){
-       pthread_mutex_lock(&dirQueue->lock);
-       activeDThreads++;
+        struct dirent *dp;
+        struct stat statbuf; // Holds file information to determine its type
 
-       activeDThreads--;
-       pthread_mutex_unlock(&dirQueue->lock);
+        pthread_mutex_lock(&dirQueue->lock);
+        activeDThreads++;
+        pthread_mutex_unlock(&dirQueue->lock);
+
+        struct pathName path = dequeue(dirQueue);
+        DIR *dr = opendir(strcat(path.prefix, path.fileName));
+        
+        // iterating through current directory
+        struct pathName *newPath;
+        while((dp = readdir(dr)) != NULL){
+            stat(dp, &statbuf);
+            // checking to see if a file or directory was read
+            if(S_ISDIR(statbuf.st_mode)){
+                //MODIFY NEW PATH HERE
+                enqueue(dirQueue, newPath);
+            } else {
+                //MODIFY NEW PATH HERE
+                enqueue(fileQueue, newPath);
+            }
+        }
+
+
+        pthread_mutex_lock(&dirQueue->lock);
+        activeDThreads--;
+        pthread_mutex_unlock(&dirQueue->lock);
    }
 }
 
@@ -269,6 +292,11 @@ int main(int argc, char **argv)
         pthread_t wrapperThreads[numOfWrappingThreads];
         pthread_t dirThreads[numOfDirectoryThreads];
 
+        struct pathName *path = malloc(sizeof(struct pathName));
+        path->prefix = "";
+        path->fileName = argv[2];
+        
+        enqueue(dirQueue, path);
         for(int i = 0; i<numOfDirectoryThreads; i++){
             pthread_create(&dirThreads[i], NULL, dirWorker, argv);
         }
