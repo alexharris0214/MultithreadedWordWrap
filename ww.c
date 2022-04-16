@@ -17,7 +17,7 @@ struct pathName {
 };
 
 struct node {
-    struct pathName path;
+    struct pathName *path;
     struct node *next;
 };
 
@@ -25,7 +25,7 @@ struct queue {
     struct node *start;
     struct node *end;
     pthread_mutex_t lock;
-    pthread_cond_t dequeue_ready;
+    pthread_cond_t *dequeue_ready;
 } *fileQueue, *dirQueue;
 
 int activeDThreads = 0;
@@ -35,22 +35,26 @@ int activeDThreads = 0;
 *
 * Returns a string with the prefix "wrap." in front of the string passed to the char *output parameter.
 */
-char *getOutputName(char *output){
-    char *outputFileName = (char *)malloc(sizeof(output) + 5); // 5 is hardcoded to be length of "wrap." (5 character)
+char *getInputName(struct pathName *file){
+    char *inputName = (char *)malloc(sizeof(char)*(strlen(file->prefix) + strlen(file->fileName) + 1));
 
-    // manually assigning the prefix
-    outputFileName [0]= 'w';
-    outputFileName [1]= 'r';
-    outputFileName [2]= 'a';
-    outputFileName [3]= 'p';
-    outputFileName [4]= '.';
+    memset(inputName, '\0', sizeof(inputName));
+    strcat(inputName, file->prefix);
+    strcat(inputName, file->fileName);
 
-    // assigning the rest of the string according the input file name
-    for(int i = 0; i<sizeof(output); i++){
-        outputFileName[5+i] = output[i];
-    }
+    return inputName;
+}
+char *getOutputName(struct pathName *file){
+    char *outputName = (char *)malloc(sizeof(char)*(strlen(file->prefix) + strlen(file->fileName) + 6));
+    memset(outputName, '\0', sizeof(outputName));
+    
+    char *wrap = "wrap.\0";
 
-    return outputFileName;
+    strcat(outputName, file->prefix);
+    strcat(outputName, wrap);
+    strcat(outputName, file->fileName);
+
+    return outputName;
 }
 
 /*
@@ -166,7 +170,7 @@ int normalize(int inputFD, int lineLength, int outputFD){
     return EXIT_SUCCESS;
 }
 
-void enqueue(struct queue *queue, struct pathName file){
+void enqueue(struct queue *queue, struct pathName *file){
     pthread_mutex_lock(&queue->lock);
 
         //malloc new node for the queue
@@ -174,11 +178,19 @@ void enqueue(struct queue *queue, struct pathName file){
         //set queue->end->next to new node
         //set queue->end to new node
 
+        struct node *new = (struct node *)malloc(sizeof(struct node));
+        new->next = NULL;
+        new->path = file;
+        queue->end->next = new;
+        queue->end = new;
+        
+        pthread_cond_signal(&queue->dequeue_ready);
+
     pthread_mutex_unlock(&queue->lock);
     return;
 }
 
-struct pathName dequeue(struct queue *queue){
+struct pathName *dequeue(struct queue *queue){
     pthread_mutex_lock(&queue->lock);
 
         //cond_wait for dequeue->ready
@@ -187,43 +199,45 @@ struct pathName dequeue(struct queue *queue){
         //save pathname of temp
         //free temp
 
+        pthread_cond_wait(&queue->dequeue_ready, &queue->lock);
+
+        struct node *temp = queue->start;
+        queue->start = temp->next;
+        struct pathName *dequeuedFile = temp->path;
+        free(temp);
+
     pthread_mutex_unlock(&queue->lock);
 
-    return; //return pathname of temp
+    return dequeuedFile; //return pathname of temp
 }
 
 void *fileWorker(void * arg){
-
-    /* while(!activeDThreads || queue is not empty){
-         block until fileQueue has stuff in it
-
-         struct pathName currFile = dequeue(fileQueue);
-
-         fd = open(currFile->prefix + currFile->fileName, O_RDONLY);
-         if(fd <= 0){ // checking to see if file is opened successfully
-            puts("ERROR: Could not open file.\n");
-             return EXIT_FAILURE;
-         }
-         // reformatting file
-         normalize(fd, arg, 1); //FIXME: make global exit status with mutex to keep track of normalize() exit status
-         close(fd);
+    while(activeDThreads || fileQueue->start != NULL){
+        struct pathName *dequeuedFile = dequeue(fileQueue);
+        char *currFile = getInputName(dequeuedFile);
+        free(dequeuedFile);
+        
+        int fd = open(currFile, O_RDONLY);
+        free(currFile);
+        if(fd <= 0){ // checking to see if file is opened successfully
+        puts("ERROR: Could not open file.\n");
+            return EXIT_FAILURE;            //FIXME: make this change the global exit status using mutex
         }
-    */
+        // reformatting file
+        normalize(fd, arg, 1); //FIXME: make global exit status with mutex to keep track of normalize() exit status
+        close(fd);
+    }
 }
 
 void *dirWorker(void * arg){
-    /* while(!dirQueue->start == NULL || activeDThreads){
-            block until dirQueue has stuff in it
+    while(!dirQueue->start == NULL || activeDThreads){
+        struct pathName *dequeuedDir = dequeue(dirQueue);
+        activeDThreads++;
             
-            increment activeDThreads
+            //enqueue directories and files in that directory (as in main)
 
-            dequeue a directory
-            
-            enqueue directories and files in that directory (as in main)
-
-            decrement activeDThreads
-        }
-    */  
+        activeDThreads--;
+    }
 }
 
 int main(int argc, char const *argv[])
