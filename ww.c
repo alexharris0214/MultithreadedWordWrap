@@ -26,7 +26,9 @@ struct queue {
     struct node *end;
     pthread_mutex_t lock;
     pthread_cond_t *dequeue_ready;
-} *fileQueue, *dirQueue;
+};
+struct queue *fileQueue;
+struct queue *dirQueue;
 
 int activeDThreads = 0;
 
@@ -96,6 +98,7 @@ int normalize(int inputFD, int lineLength, int outputFD){
         return EXIT_FAILURE;
     }         
     while(bytesRead > 0){
+
         for(i = 0; i < bytesRead; i++){         //iterate thru bytes read, one char at a time
             if(isspace(buffer[i])){ 
 
@@ -146,6 +149,7 @@ int normalize(int inputFD, int lineLength, int outputFD){
             
         bytesRead = read(inputFD, buffer, BUFFER_SIZE);
     }
+
     //Need to print last word after program is finished reading input
     if(currWord[0] != '\0'){
         if(newPG){   //start a new paragraph before the next word is written if needed
@@ -175,7 +179,6 @@ int normalize(int inputFD, int lineLength, int outputFD){
     free(currWord);
     return EXIT_SUCCESS;
 }
-
 
 void init_queue(struct queue *queue){
     queue->start = NULL;
@@ -242,7 +245,7 @@ void *fileWorker(void * arg){
         struct pathName *dequeuedFile = dequeue(fileQueue);
         char *currFile = getInputName(dequeuedFile);
         free(dequeuedFile);
-        
+
         int fd = open(currFile, O_RDONLY);
         free(currFile);
         if(fd <= 0){ // checking to see if file is opened successfully
@@ -263,7 +266,6 @@ void *dirWorker(void * arg){
 
         // ADD MUTEX FOR ACTIVE THREADS AND EXIT STATUS
 
-
         struct pathName *path = dequeue(dirQueue);
         DIR *dr = opendir(getInputName(path));
         
@@ -275,10 +277,10 @@ void *dirWorker(void * arg){
         struct pathName *newPath;
         while((dp = readdir(dr)) != NULL){
             stat(dp, &statbuf);
+
             // checking to see if a file or directory was read
             // MODIFY NEW PATH HERE
             if(S_ISDIR(statbuf.st_mode)){
-                
                 enqueue(dirQueue, newPath);
             } else {
                 
@@ -326,6 +328,10 @@ int main(int argc, char **argv)
 
         pthread_t wrapperThreads[numOfWrappingThreads];
         pthread_t dirThreads[numOfDirectoryThreads];
+
+
+        dirQueue = (struct queue *) malloc(sizeof(struct queue));
+        fileQueue = (struct queue *) malloc(sizeof(struct queue));
 
         init_queue(dirQueue);
         init_queue(fileQueue);
