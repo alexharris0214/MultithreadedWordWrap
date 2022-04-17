@@ -36,23 +36,28 @@ int activeDThreads = 0;
 * Returns a string with the prefix "wrap." in front of the string passed to the char *output parameter.
 */
 char *getInputName(struct pathName *file){
-    char *inputName = (char *)malloc(sizeof(char)*(strlen(file->prefix) + strlen(file->fileName) + 1));
+    int plen = strlen(file->prefix);
+    int nlen = strlen(file->fileName);
+    
+    char *inputName = (char *)malloc(sizeof(char)*(plen + nlen + 1));
 
-    memset(inputName, '\0', sizeof(inputName));
-    strcat(inputName, file->prefix);
-    strcat(inputName, file->fileName);
+    memcpy(inputName, file->prefix, plen);
+    memcpy(inputName + plen, file->fileName, nlen);
+    memset(inputName + plen + nlen, '\0', 1);
 
     return inputName;
 }
 char *getOutputName(struct pathName *file){
-    char *outputName = (char *)malloc(sizeof(char)*(strlen(file->prefix) + strlen(file->fileName) + 6));
-    memset(outputName, '\0', sizeof(outputName));
+    int plen = strlen(file->prefix);
+    int nlen = strlen(file->fileName);
+    char *outputName = (char *)malloc(sizeof(char)*(plen + nlen + 6));
     
-    char *wrap = "wrap.\0";
+    char *wrap = {'w','r','a','p','.'};
 
-    strcat(outputName, file->prefix);
-    strcat(outputName, wrap);
-    strcat(outputName, file->fileName);
+    memcpy(outputName, file->prefix, plen);
+    memcpy(outputName + plen, wrap, 5);
+    memcpy(outputName + plen + 5, file->fileName, nlen);
+    memset(outputName + plen + nlen + 5, '\0', 1);
 
     return outputName;
 }
@@ -179,31 +184,25 @@ void init_queue(struct queue *queue){
 void enqueue(struct queue *queue, struct pathName *file){
     pthread_mutex_lock(&queue->lock);
 
-        node *temp = malloc(sizeof(node));
+        struct node *new = (struct node *)malloc(sizeof(struct node));
 
         // checking to see if malloc returned correctly
-        if(temp == NULL){
+        if(new == NULL){
             return EXIT_FAILURE;
         }
         // allocating new node (temp) accordingly
-        temp->path = *file;
-        temp->next = NULL;
+        new->next = NULL;
+        new->path = file;
         
         // if the end exists, attach the new node to the next pointer of end
         if(queue->end != NULL){
-            queue->end->next = temp;
+            queue->end->next = new;
         }
-        queue->end = temp; // change the end to point to the new node
+        queue->end = new; // change the end to point to the new node
 
         if(queue->start == NULL){ // make sure that head always points to something if data exists
-            queue->start  = temp;
+            queue->start  = new;
         }
-
-        struct node *new = (struct node *)malloc(sizeof(struct node));
-        new->next = NULL;
-        new->path = file;
-        queue->end->next = new;
-        queue->end = new;
         
         pthread_cond_signal(&queue->dequeue_ready);
 
@@ -223,8 +222,11 @@ struct pathName *dequeue(struct queue *queue){
         pthread_cond_wait(&queue->dequeue_ready, &queue->lock);
 
         struct node *temp = queue->start;
+
         queue->start = temp->next;
+
         struct pathName *dequeuedFile = temp->path;
+        
         free(temp);
 
     pthread_mutex_unlock(&queue->lock);
@@ -252,8 +254,6 @@ void *fileWorker(void * arg){
 
 void *dirWorker(void * arg){
     while(!dirQueue->start == NULL || activeDThreads){
-        //struct pathName *dequeuedDir = dequeue(dirQueue); should we just use this to block?
-        activeDThreads++;
         struct dirent *dp;
         struct stat statbuf; // Holds file information to determine its type
 
@@ -261,8 +261,8 @@ void *dirWorker(void * arg){
         activeDThreads++;
         pthread_mutex_unlock(&dirQueue->lock);
 
-        struct pathName path = dequeue(dirQueue);
-        DIR *dr = opendir(strcat(path.prefix, path.fileName));
+        struct pathName *path = dequeue(dirQueue);
+        DIR *dr = opendir(getInputName(path));
         
         // iterating through current directory
         struct pathName *newPath;
