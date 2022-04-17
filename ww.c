@@ -47,6 +47,7 @@ char *getInputName(struct pathName *file){
 
     return inputName;
 }
+
 char *getOutputName(struct pathName *file){
     int plen = strlen(file->prefix);
     int nlen = strlen(file->fileName);
@@ -179,6 +180,8 @@ int normalize(int inputFD, int lineLength, int outputFD){
 void init_queue(struct queue *queue){
     queue->start = NULL;
     queue->end = NULL;
+    pthread_mutex_init(&queue->lock, NULL);
+    pthread_cond_init(&queue->dequeue_ready, NULL);
 }
 
 void enqueue(struct queue *queue, struct pathName *file){
@@ -278,7 +281,6 @@ void *dirWorker(void * arg){
             }
         }
 
-
         pthread_mutex_lock(&dirQueue->lock);
         activeDThreads--;
         pthread_mutex_unlock(&dirQueue->lock);
@@ -297,7 +299,7 @@ int main(int argc, char **argv)
 
     int numOfWrappingThreads = 0;
     int numOfDirectoryThreads = 0;
-
+    
     /*
     * checking to see if arguments were passed in before accessing
     * returns exit failure if no arguments were passed in 
@@ -320,11 +322,16 @@ int main(int argc, char **argv)
         pthread_t wrapperThreads[numOfWrappingThreads];
         pthread_t dirThreads[numOfDirectoryThreads];
 
+        init_queue(dirQueue);
+        init_queue(fileQueue);
+
         struct pathName *path = malloc(sizeof(struct pathName));
         path->prefix = "";
         path->fileName = argv[2];
+
+        char *rootPath = getInputName(path);
         
-        enqueue(dirQueue, path);
+        enqueue(dirQueue, rootPath);
         for(int i = 0; i<numOfDirectoryThreads; i++){
             pthread_create(&dirThreads[i], NULL, dirWorker, argv);
         }
@@ -337,90 +344,90 @@ int main(int argc, char **argv)
         for(int i = 0; i<numOfWrappingThreads; i++){
             pthread_join(wrapperThreads[i], NULL);
         }
-   } else {
-        if(argc>1){
-            for(int i = 0; i < strlen(argv[1]); i++){ //check if length argument is a number
-                if(!isdigit(argv[1][i])){               // checking each digit individually
-                    puts("ERROR: Invalid lineLength argument; must be an integer.");
-                    return EXIT_FAILURE;
-                }
-            }
-        } else {
-            puts("ERROR: Not enough arguments given.");
-            return EXIT_FAILURE;
-        }
+//    } else {
+//         if(argc>1){
+//             for(int i = 0; i < strlen(argv[1]); i++){ //check if length argument is a number
+//                 if(!isdigit(argv[1][i])){               // checking each digit individually
+//                     puts("ERROR: Invalid lineLength argument; must be an integer.");
+//                     return EXIT_FAILURE;
+//                 }
+//             }
+//         } else {
+//             puts("ERROR: Not enough arguments given.");
+//             return EXIT_FAILURE;
+//         }
 
-        int length = atoi(argv[1]);
+//         int length = atoi(argv[1]);
 
-        /*
-        * Checks to see if valid arguments are passed in
-        * if it was, check to see if file argument is a directory or normal file
-        * if not, exit with failure
-        */
-        if(argc == 3){
-            err = stat(argv[2], &statbuf);
-            // Checking to see if fstat returned a valid stat struct
-            if(err){
-                perror(argv[2]); //printing out what went wrong when accessing the file
-                return EXIT_FAILURE;
-            }
+//         /*
+//         * Checks to see if valid arguments are passed in
+//         * if it was, check to see if file argument is a directory or normal file
+//         * if not, exit with failure
+//         */
+//         if(argc == 3){
+//             err = stat(argv[2], &statbuf);
+//             // Checking to see if fstat returned a valid stat struct
+//             if(err){
+//                 perror(argv[2]); //printing out what went wrong when accessing the file
+//                 return EXIT_FAILURE;
+//             }
 
-            // file argument is a directory
-            if(S_ISDIR(statbuf.st_mode)){
-                dr = opendir(argv[2]);
-                if(dr <= 0 ){ // error checking to see if directory was opened
-                    puts("ERROR: Could not open directory.\n");
-                }
-                chdir(argv[2]); // Changing the working directory to have access to the files we need
+//             // file argument is a directory
+//             if(S_ISDIR(statbuf.st_mode)){
+//                 dr = opendir(argv[2]);
+//                 if(dr <= 0 ){ // error checking to see if directory was opened
+//                     puts("ERROR: Could not open directory.\n");
+//                 }
+//                 chdir(argv[2]); // Changing the working directory to have access to the files we need
 
-                int outputFD;
-                while ((dp = readdir(dr)) != NULL){ // while there are files to be read
+//                 int outputFD;
+//                 while ((dp = readdir(dr)) != NULL){ // while there are files to be read
 
-                    //ignoring files which start with "." or "wrap."
-                    if(strstr(dp->d_name, ".") == dp->d_name || strstr(dp->d_name, "wrap.") == dp->d_name){
-                        continue;
-                    }
+//                     //ignoring files which start with "." or "wrap."
+//                     if(strstr(dp->d_name, ".") == dp->d_name || strstr(dp->d_name, "wrap.") == dp->d_name){
+//                         continue;
+//                     }
             
-                    // open the current file that we are on and work on it
-                    fd = open(dp->d_name, O_RDONLY);
-                    if(fd > 0 && dp->d_name){ // checking to see if file opened successfully
-                        char *outputFilename = getOutputName(dp->d_name);
-                        outputFD = open(outputFilename, O_WRONLY|O_CREAT|O_TRUNC, 0700);    // creating file if it does not exist with user RWX permissions
-                        free(outputFilename);                                        
-                        if(outputFD <= 0){                                                  // checking to see if open returned successfully 
-                            puts("ERROR: Could not open/create desired output file.\n");
-                            perror("outputFD");
-                            return EXIT_FAILURE;
-                        }
-                        if(normalize(fd, length, outputFD) == EXIT_FAILURE)     //save exit status to return later, as the program still needs to process the rest of the directory
-                            exitFlag = EXIT_FAILURE;
-                        close(outputFD);
-                    }
-                    // close file when we are done
-                    close(fd);
-                }
-                // freeing directory object
-                free(dr);
-            } else if(S_ISREG(statbuf.st_mode)){ // file argument is a regular file
-                fd = open(argv[2], O_RDONLY);
-                if(fd <= 0){ // checking to see if file is opened successfully
-                    puts("ERROR: Could not open file.\n");
-                    return EXIT_FAILURE;
-                }
-                // reformatting file and assigning the result to return flag
-                exitFlag = normalize(fd, length, 1);
-                close(fd);
-            } else {
-                puts("ERROR: Invalid file type passed as argument.\n");
-                    return EXIT_FAILURE;
-            }
-        } else if(argc==2){     // no file was passed in; reading from standard input
-            normalize(0, length, 1);
-            return EXIT_FAILURE;
-        } else {                // fall through case when not enough arguments are passed
-            puts("ERROR: Not enough arguments.\n");
-            return EXIT_FAILURE;
-        }
-        return exitFlag;
+//                     // open the current file that we are on and work on it
+//                     fd = open(dp->d_name, O_RDONLY);
+//                     if(fd > 0 && dp->d_name){ // checking to see if file opened successfully
+//                         char *outputFilename = getOutputName(dp->d_name);
+//                         outputFD = open(outputFilename, O_WRONLY|O_CREAT|O_TRUNC, 0700);    // creating file if it does not exist with user RWX permissions
+//                         free(outputFilename);                                        
+//                         if(outputFD <= 0){                                                  // checking to see if open returned successfully 
+//                             puts("ERROR: Could not open/create desired output file.\n");
+//                             perror("outputFD");
+//                             return EXIT_FAILURE;
+//                         }
+//                         if(normalize(fd, length, outputFD) == EXIT_FAILURE)     //save exit status to return later, as the program still needs to process the rest of the directory
+//                             exitFlag = EXIT_FAILURE;
+//                         close(outputFD);
+//                     }
+//                     // close file when we are done
+//                     close(fd);
+//                 }
+//                 // freeing directory object
+//                 free(dr);
+//             } else if(S_ISREG(statbuf.st_mode)){ // file argument is a regular file
+//                 fd = open(argv[2], O_RDONLY);
+//                 if(fd <= 0){ // checking to see if file is opened successfully
+//                     puts("ERROR: Could not open file.\n");
+//                     return EXIT_FAILURE;
+//                 }
+//                 // reformatting file and assigning the result to return flag
+//                 exitFlag = normalize(fd, length, 1);
+//                 close(fd);
+//             } else {
+//                 puts("ERROR: Invalid file type passed as argument.\n");
+//                     return EXIT_FAILURE;
+//             }
+//         } else if(argc==2){     // no file was passed in; reading from standard input
+//             normalize(0, length, 1);
+//             return EXIT_FAILURE;
+//         } else {                // fall through case when not enough arguments are passed
+//             puts("ERROR: Not enough arguments.\n");
+//             return EXIT_FAILURE;
+//         }
+//         return exitFlag;
    }
 }
