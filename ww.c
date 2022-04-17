@@ -256,27 +256,32 @@ void *fileWorker(void * arg){
 }
 
 void *dirWorker(void * arg){
+
     while(!dirQueue->start == NULL || activeDThreads){
         struct dirent *dp;
         struct stat statbuf; // Holds file information to determine its type
 
-        pthread_mutex_lock(&dirQueue->lock);
-        activeDThreads++;
-        pthread_mutex_unlock(&dirQueue->lock);
+        // ADD MUTEX FOR ACTIVE THREADS AND EXIT STATUS
+
 
         struct pathName *path = dequeue(dirQueue);
         DIR *dr = opendir(getInputName(path));
         
+        pthread_mutex_lock(&dirQueue->lock);
+        activeDThreads++;
+        pthread_mutex_unlock(&dirQueue->lock);
+
         // iterating through current directory
         struct pathName *newPath;
         while((dp = readdir(dr)) != NULL){
             stat(dp, &statbuf);
             // checking to see if a file or directory was read
+            // MODIFY NEW PATH HERE
             if(S_ISDIR(statbuf.st_mode)){
-                //MODIFY NEW PATH HERE
+                
                 enqueue(dirQueue, newPath);
             } else {
-                //MODIFY NEW PATH HERE
+                
                 enqueue(fileQueue, newPath);
             }
         }
@@ -297,19 +302,19 @@ int main(int argc, char **argv)
     int err; // Variable to store error information
     int exitFlag = EXIT_SUCCESS; //determine what exit status we return
 
-    int numOfWrappingThreads = 0;
-    int numOfDirectoryThreads = 0;
+    int numOfWrappingThreads;
+    int numOfDirectoryThreads;
     
     /*
     * checking to see if arguments were passed in before accessing
     * returns exit failure if no arguments were passed in 
     */
-   if(argc==4){
-        if(strlen(argv[1]) ==2){
+    if(argc==4){
+        if(strlen(argv[1]) == 2){ // change condition to compare with "-r"
            numOfWrappingThreads = 1;
            numOfDirectoryThreads = 1;
         } else if(strlen(argv[1]) == 3){
-           numOfWrappingThreads = atoi(argv[1]);
+           numOfWrappingThreads = argv[1][2] - '0';
            numOfDirectoryThreads = 1;
         } else if(strlen(argv[1]) == 5){
            numOfWrappingThreads = argv[1][4] - '0';
@@ -326,12 +331,14 @@ int main(int argc, char **argv)
         init_queue(fileQueue);
 
         struct pathName *path = malloc(sizeof(struct pathName));
+
         path->prefix = "";
         path->fileName = argv[2];
 
         char *rootPath = getInputName(path);
         
         enqueue(dirQueue, rootPath);
+
         for(int i = 0; i<numOfDirectoryThreads; i++){
             pthread_create(&dirThreads[i], NULL, dirWorker, argv);
         }
@@ -344,6 +351,7 @@ int main(int argc, char **argv)
         for(int i = 0; i<numOfWrappingThreads; i++){
             pthread_join(wrapperThreads[i], NULL);
         }
+        free(path);
 //    } else {
 //         if(argc>1){
 //             for(int i = 0; i < strlen(argv[1]); i++){ //check if length argument is a number
