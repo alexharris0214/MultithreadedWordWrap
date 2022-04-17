@@ -26,7 +26,9 @@ struct queue {
     struct node *end;
     pthread_mutex_t lock;
     pthread_cond_t *dequeue_ready;
-} *fileQueue, *dirQueue;
+};
+struct queue *fileQueue;
+struct queue *dirQueue;
 
 int activeDThreads = 0;
 
@@ -222,7 +224,8 @@ struct pathName *dequeue(struct queue *queue){
         //save pathname of temp
         //free temp
 
-        pthread_cond_wait(&queue->dequeue_ready, &queue->lock);
+        while(queue->start == NULL)
+            pthread_cond_wait(&queue->dequeue_ready, &queue->lock);
 
         struct node *temp = queue->start;
 
@@ -322,10 +325,12 @@ int main(int argc, char **argv)
         pthread_t wrapperThreads[numOfWrappingThreads];
         pthread_t dirThreads[numOfDirectoryThreads];
 
+        dirQueue = (struct queue *)malloc(sizeof(struct queue));
+        fileQueue = (struct queue *)malloc(sizeof(struct queue));          
         init_queue(dirQueue);
         init_queue(fileQueue);
 
-        struct pathName *path = malloc(sizeof(struct pathName));
+        struct pathName *path = (struct pathName *)malloc(sizeof(struct pathName));
         path->prefix = "";
         path->fileName = argv[2];
 
@@ -338,12 +343,15 @@ int main(int argc, char **argv)
         for(int i = 0; i<numOfWrappingThreads; i++){
             pthread_create(&wrapperThreads[i], NULL, fileWorker, argv);
         }
+        //FIXME: check for all waiting threads to terminate all at once
         for(int i = 0; i<numOfDirectoryThreads; i++){
             pthread_join(dirThreads[i], NULL);
         }
         for(int i = 0; i<numOfWrappingThreads; i++){
             pthread_join(wrapperThreads[i], NULL);
         }
+        free(dirQueue);
+        free(fileQueue);
 //    } else {
 //         if(argc>1){
 //             for(int i = 0; i < strlen(argv[1]); i++){ //check if length argument is a number
