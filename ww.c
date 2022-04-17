@@ -11,6 +11,7 @@
 
 #define BUFFER_SIZE 16
 
+int activeDThreads = 0;
 struct pathName {
     char *prefix;
     char *fileName;
@@ -19,18 +20,14 @@ struct pathName {
 struct node {
     struct pathName *path;
     struct node *next;
-} node;
+};
 
 struct queue {
     struct node *start;
     struct node *end;
     pthread_mutex_t lock;
-    pthread_cond_t *dequeue_ready;
-};
-struct queue *fileQueue;
-struct queue *dirQueue;
-
-int activeDThreads = 0;
+    pthread_cond_t dequeue_ready;
+} *fileQueue, *dirQueue;
 
 /*
 * char *output: a string containing a filename which needs an output file to write to
@@ -40,14 +37,16 @@ int activeDThreads = 0;
 char *getInputName(struct pathName *file){
     int plen = strlen(file->prefix);
     int nlen = strlen(file->fileName);
-    
-    char *inputName = (char *)malloc(sizeof(char)*(plen + nlen + 1));
 
-    memcpy(inputName, file->prefix, plen);
-    memcpy(inputName + plen, file->fileName, nlen);
-    memset(inputName + plen + nlen, '\0', 1);
-
-    return inputName;
+    if(plen != 0){
+        char *inputName = (char *)malloc(sizeof(char)*(plen + nlen + 2));
+        memcpy(inputName, file->prefix, plen);
+        inputName[plen] = '/';
+        memcpy(inputName + plen + 1, file->fileName, nlen);
+        inputName[plen + nlen + 1] = '\0';
+        return inputName;
+    } 
+    return file->fileName;
 }
 
 char *getOutputName(struct pathName *file){
@@ -55,7 +54,7 @@ char *getOutputName(struct pathName *file){
     int nlen = strlen(file->fileName);
     char *outputName = (char *)malloc(sizeof(char)*(plen + nlen + 6));
     
-    char *wrap = {'w','r','a','p','.'};
+    char wrap[] = {'w','r','a','p','.'};
 
     memcpy(outputName, file->prefix, plen);
     memcpy(outputName + plen, wrap, 5);
@@ -183,7 +182,7 @@ int normalize(int inputFD, int lineLength, int outputFD){
 void init_queue(struct queue *queue){
     queue->start = NULL;
     queue->end = NULL;
-    pthread_mutex_init(&queue->lock, NULL);
+    pthread_cond_init(&queue->lock, NULL);
     pthread_cond_init(&queue->dequeue_ready, NULL);
 }
 
@@ -207,7 +206,7 @@ void enqueue(struct queue *queue, struct pathName *file){
         queue->end = new; // change the end to point to the new node
 
         if(queue->start == NULL){ // make sure that head always points to something if data exists
-            queue->start  = new;
+            queue->start = new;
         }
         
         pthread_cond_signal(&queue->dequeue_ready);
@@ -259,7 +258,7 @@ void *fileWorker(void * arg){
     }
 }
 
-void *dirWorker(void * arg){
+/*void *dirWorker(void * arg){
 
     while(!dirQueue->start == NULL || activeDThreads){
         struct dirent *dp;
@@ -293,7 +292,7 @@ void *dirWorker(void * arg){
         activeDThreads--;
         pthread_mutex_unlock(&dirQueue->lock);
    }
-}
+}*/
 
 int main(int argc, char **argv)
 {
@@ -307,12 +306,47 @@ int main(int argc, char **argv)
 
     int numOfWrappingThreads;
     int numOfDirectoryThreads;
+         
+    dirQueue = (struct queue *)malloc(sizeof(struct queue));
+    fileQueue = (struct queue *)malloc(sizeof(struct queue));
+
+    init_queue(dirQueue);
+    init_queue(fileQueue);
+
+    struct pathName *path = (struct pathName *)malloc(sizeof(struct pathName));
+
+    path->prefix = "";
+    path->fileName = "example1.txt\0"; 
+
+    enqueue(fileQueue, path);
+
+    struct pathName *file = dequeue(fileQueue);
+    char *inputName = getInputName(file);
+    char *outputName = getOutputName(file);
+
+    fd = open(inputName, O_RDONLY);
+    int fd2 = open(outputName, O_WRONLY|O_CREAT|O_TRUNC, 0700);
+
+    normalize(fd, 20, fd2);
     
+    
+    pthread_cond_destroy(&fileQueue->dequeue_ready);
+    pthread_cond_destroy(&dirQueue->dequeue_ready);
+    pthread_mutex_destroy(&fileQueue->lock);
+    pthread_mutex_destroy(&dirQueue->lock);
+    free(dirQueue);
+    free(fileQueue);
+    free(path);
+    free(outputName);
+
+    //FIXME: initialize queues in main and pass the queue pointers as args
+    //FIXME: create worker arg array infrastructure
+
     /*
     * checking to see if arguments were passed in before accessing
     * returns exit failure if no arguments were passed in 
     */
-    if(argc==4){
+    /*if(argc==4){
         if(strlen(argv[1]) == 2){ // change condition to compare with "-r"
            numOfWrappingThreads = 1;
            numOfDirectoryThreads = 1;
@@ -338,11 +372,9 @@ int main(int argc, char **argv)
         struct pathName *path = (struct pathName *)malloc(sizeof(struct pathName));
 
         path->prefix = "";
-        path->fileName = argv[2];
-
-        char *rootPath = getInputName(path);
+        path->fileName = argv[3];
         
-        enqueue(dirQueue, rootPath);
+        enqueue(dirQueue, path);
 
         for(int i = 0; i<numOfDirectoryThreads; i++){
             pthread_create(&dirThreads[i], NULL, dirWorker, argv);
@@ -445,5 +477,5 @@ int main(int argc, char **argv)
 //             return EXIT_FAILURE;
 //         }
 //         return exitFlag;
-   }
+//   }
 }
