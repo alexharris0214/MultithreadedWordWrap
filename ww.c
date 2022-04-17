@@ -27,7 +27,20 @@ struct queue {
     struct node *end;
     pthread_mutex_t lock;
     pthread_cond_t dequeue_ready;
+    int closed;
 } *fileQueue, *dirQueue;
+
+void queue_close(struct queue *queue){
+    pthread_mutex_lock(&queue->lock);
+
+        queue->closed = 1;
+
+        pthread_cond_broadcast(&queue->dequeue_ready);
+
+    pthread_mutex_unlock(&queue->lock);
+
+    return;
+}
 
 /*
 * char *output: a string containing a filename which needs an output file to write to
@@ -186,6 +199,7 @@ int normalize(int inputFD, int lineLength, int outputFD){
 void init_queue(struct queue *queue){
     queue->start = NULL;
     queue->end = NULL;
+    queue->closed = 0;
     pthread_cond_init(&queue->lock, NULL);
     pthread_cond_init(&queue->dequeue_ready, NULL);
 }
@@ -245,7 +259,7 @@ struct pathName *dequeue(struct queue *queue){
 }
 
 void *fileWorker(void * arg){
-    while(activeDThreads || fileQueue->start != NULL){
+    while(!dirQueue->closed || fileQueue->start != NULL){
         struct pathName *dequeuedFile = dequeue(fileQueue);
         char *inFile = getInputName(dequeuedFile);
         char *outFile = getOutputName(dequeuedFile);
@@ -267,49 +281,53 @@ void *fileWorker(void * arg){
         close(inFD);
         close(outFD);
     }
-
     return;
 }
 
-/*void *dirWorker(void * arg){
-
-    while(!dirQueue->start == NULL || activeDThreads){
+void *dirWorker(void * arg){
+    while(!dirQueue->closed || dirQueue->start != NULL || activeDThreads){
         struct dirent *dp;
         struct stat statbuf; // Holds file information to determine its type
 
         // ADD MUTEX FOR ACTIVE THREADS AND EXIT STATUS
 
-        struct pathName *path = dequeue(dirQueue);
-        DIR *dr = opendir(getInputName(path));
+        struct pathName *dequeuedFile = dequeue(dirQueue);
+        char *currDir = getInputName(dequeuedFile);
+        DIR *dr = opendir(currDir);
         
         pthread_mutex_lock(&dirQueue->lock);
         activeDThreads++;
         pthread_mutex_unlock(&dirQueue->lock);
 
         // iterating through current directory
-        struct pathName *newPath;
+        struct pathName *newPath = (struct pathName *)malloc(sizeof(struct pathName));
         while((dp = readdir(dr)) != NULL){
             stat(dp, &statbuf);
 
             // checking to see if a file or directory was read
-            // MODIFY NEW PATH HERE
+            newPath->prefix = currDir;
+            newPath->fileName = dp->d_name;
             if(S_ISDIR(statbuf.st_mode)){
                 enqueue(dirQueue, newPath);
             } else {
-                
                 enqueue(fileQueue, newPath);
             }
         }
 
+        free(dequeuedFile);
+        free(currDir);
+
         pthread_mutex_lock(&dirQueue->lock);
         activeDThreads--;
         pthread_mutex_unlock(&dirQueue->lock);
+
+        if(!activeDThreads && dirQueue->start == NULL)
+            queue_close(dirQueue);
    }
-}*/
+}
 
 int main(int argc, char **argv)
 {
-
     int fd = -1; // File pointer
     DIR *dr = NULL; // Directory pointer
     struct stat statbuf; // Holds file information to determine its type
@@ -317,7 +335,8 @@ int main(int argc, char **argv)
     int err; // Variable to store error information
     int exitFlag = EXIT_SUCCESS; //determine what exit status we return
 
-    int numOfWrappingThreads = 1;
+    int numOfWrappingThreads = 3;
+    int numOfDirectoryThreads = 1;
          
     dirQueue = (struct queue *)malloc(sizeof(struct queue));
     fileQueue = (struct queue *)malloc(sizeof(struct queue));
@@ -327,16 +346,24 @@ int main(int argc, char **argv)
 
     struct pathName *path = (struct pathName *)malloc(sizeof(struct pathName));
 
-    path->prefix = "";
-    path->fileName = "example1.txt\0"; 
+    path->prefix = "\0";
+    path->fileName = "moreExamples"; 
 
-    enqueue(fileQueue, path);
+    enqueue(dirQueue, path);
 
     pthread_t wrapperThreads[numOfWrappingThreads];
+    pthread_t directoryThreads[numOfDirectoryThreads];
 
-    pthread_create(&wrapperThreads[0], NULL, fileWorker, argv[1]);
+    pthread_create(&directoryThreads[0], NULL, dirWorker, NULL);
 
+    pthread_create(&wrapperThreads[0], NULL, fileWorker, NULL);
+    pthread_create(&wrapperThreads[1], NULL, fileWorker, NULL);
+    pthread_create(&wrapperThreads[2], NULL, fileWorker, NULL);
+
+    pthread_join(directoryThreads[0], NULL);
     pthread_join(wrapperThreads[0], NULL);
+    pthread_join(wrapperThreads[1], NULL);
+    pthread_join(wrapperThreads[2], NULL);
     
     pthread_cond_destroy(&fileQueue->dequeue_ready);
     pthread_cond_destroy(&dirQueue->dequeue_ready);
