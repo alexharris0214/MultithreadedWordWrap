@@ -37,16 +37,20 @@ struct queue {
 char *getInputName(struct pathName *file){
     int plen = strlen(file->prefix);
     int nlen = strlen(file->fileName);
+    char *inputName;
 
     if(plen != 0){
-        char *inputName = (char *)malloc(sizeof(char)*(plen + nlen + 2));
+        inputName = (char *)malloc(sizeof(char)*(plen + nlen + 2));
         memcpy(inputName, file->prefix, plen);
         inputName[plen] = '/';
         memcpy(inputName + plen + 1, file->fileName, nlen);
         inputName[plen + nlen + 1] = '\0';
-        return inputName;
-    } 
-    return file->fileName;
+    } else {
+        inputName = (char *)malloc(sizeof(char)*(nlen + 1));
+        memcpy(inputName, file->fileName, nlen);
+        inputName[nlen] = '\0';
+    }
+    return inputName;
 }
 
 char *getOutputName(struct pathName *file){
@@ -243,19 +247,28 @@ struct pathName *dequeue(struct queue *queue){
 void *fileWorker(void * arg){
     while(activeDThreads || fileQueue->start != NULL){
         struct pathName *dequeuedFile = dequeue(fileQueue);
-        char *currFile = getInputName(dequeuedFile);
+        char *inFile = getInputName(dequeuedFile);
+        char *outFile = getOutputName(dequeuedFile);
         free(dequeuedFile);
 
-        int fd = open(currFile, O_RDONLY);
-        free(currFile);
-        if(fd <= 0){ // checking to see if file is opened successfully
-        puts("ERROR: Could not open file.\n");
+        int inFD = open(inFile, O_RDONLY);
+        int outFD = open(outFile, O_WRONLY|O_CREAT|O_TRUNC, 0700);
+
+        free(inFile);
+        free(outFile);
+
+        if(inFD <= 0 || outFD <= 0){ // checking to see if file is opened successfully
+        puts("ERROR: Could not open a file.\n");
             return EXIT_FAILURE;            //FIXME: make this change the global exit status using mutex
         }
+
         // reformatting file
-        normalize(fd, arg, 1); //FIXME: make global exit status with mutex to keep track of normalize() exit status
-        close(fd);
+        normalize(inFD, 20, outFD); //FIXME: make global exit status with mutex to keep track of normalize() exit status
+        close(inFD);
+        close(outFD);
     }
+
+    return;
 }
 
 /*void *dirWorker(void * arg){
@@ -304,8 +317,7 @@ int main(int argc, char **argv)
     int err; // Variable to store error information
     int exitFlag = EXIT_SUCCESS; //determine what exit status we return
 
-    int numOfWrappingThreads;
-    int numOfDirectoryThreads;
+    int numOfWrappingThreads = 1;
          
     dirQueue = (struct queue *)malloc(sizeof(struct queue));
     fileQueue = (struct queue *)malloc(sizeof(struct queue));
@@ -320,15 +332,11 @@ int main(int argc, char **argv)
 
     enqueue(fileQueue, path);
 
-    struct pathName *file = dequeue(fileQueue);
-    char *inputName = getInputName(file);
-    char *outputName = getOutputName(file);
+    pthread_t wrapperThreads[numOfWrappingThreads];
 
-    fd = open(inputName, O_RDONLY);
-    int fd2 = open(outputName, O_WRONLY|O_CREAT|O_TRUNC, 0700);
+    pthread_create(&wrapperThreads[0], NULL, fileWorker, argv[1]);
 
-    normalize(fd, 20, fd2);
-    
+    pthread_join(wrapperThreads[0], NULL);
     
     pthread_cond_destroy(&fileQueue->dequeue_ready);
     pthread_cond_destroy(&dirQueue->dequeue_ready);
@@ -336,12 +344,8 @@ int main(int argc, char **argv)
     pthread_mutex_destroy(&dirQueue->lock);
     free(dirQueue);
     free(fileQueue);
-    free(path);
-    free(outputName);
 
-    //FIXME: initialize queues in main and pass the queue pointers as args
     //FIXME: create worker arg array infrastructure
-
     /*
     * checking to see if arguments were passed in before accessing
     * returns exit failure if no arguments were passed in 
