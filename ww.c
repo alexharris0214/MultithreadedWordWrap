@@ -98,6 +98,7 @@ int normalize(int inputFD, int lineLength, int outputFD){
         return EXIT_FAILURE;
     }         
     while(bytesRead > 0){
+
         for(i = 0; i < bytesRead; i++){         //iterate thru bytes read, one char at a time
             if(isspace(buffer[i])){ 
 
@@ -148,6 +149,7 @@ int normalize(int inputFD, int lineLength, int outputFD){
             
         bytesRead = read(inputFD, buffer, BUFFER_SIZE);
     }
+
     //Need to print last word after program is finished reading input
     if(currWord[0] != '\0'){
         if(newPG){   //start a new paragraph before the next word is written if needed
@@ -177,7 +179,6 @@ int normalize(int inputFD, int lineLength, int outputFD){
     free(currWord);
     return EXIT_SUCCESS;
 }
-
 
 void init_queue(struct queue *queue){
     queue->start = NULL;
@@ -245,7 +246,7 @@ void *fileWorker(void * arg){
         struct pathName *dequeuedFile = dequeue(fileQueue);
         char *currFile = getInputName(dequeuedFile);
         free(dequeuedFile);
-        
+
         int fd = open(currFile, O_RDONLY);
         free(currFile);
         if(fd <= 0){ // checking to see if file is opened successfully
@@ -259,27 +260,31 @@ void *fileWorker(void * arg){
 }
 
 void *dirWorker(void * arg){
+
     while(!dirQueue->start == NULL || activeDThreads){
         struct dirent *dp;
         struct stat statbuf; // Holds file information to determine its type
 
-        pthread_mutex_lock(&dirQueue->lock);
-        activeDThreads++;
-        pthread_mutex_unlock(&dirQueue->lock);
+        // ADD MUTEX FOR ACTIVE THREADS AND EXIT STATUS
 
         struct pathName *path = dequeue(dirQueue);
         DIR *dr = opendir(getInputName(path));
         
+        pthread_mutex_lock(&dirQueue->lock);
+        activeDThreads++;
+        pthread_mutex_unlock(&dirQueue->lock);
+
         // iterating through current directory
         struct pathName *newPath;
         while((dp = readdir(dr)) != NULL){
             stat(dp, &statbuf);
+
             // checking to see if a file or directory was read
+            // MODIFY NEW PATH HERE
             if(S_ISDIR(statbuf.st_mode)){
-                //MODIFY NEW PATH HERE
                 enqueue(dirQueue, newPath);
             } else {
-                //MODIFY NEW PATH HERE
+                
                 enqueue(fileQueue, newPath);
             }
         }
@@ -300,19 +305,19 @@ int main(int argc, char **argv)
     int err; // Variable to store error information
     int exitFlag = EXIT_SUCCESS; //determine what exit status we return
 
-    int numOfWrappingThreads = 0;
-    int numOfDirectoryThreads = 0;
+    int numOfWrappingThreads;
+    int numOfDirectoryThreads;
     
     /*
     * checking to see if arguments were passed in before accessing
     * returns exit failure if no arguments were passed in 
     */
-   if(argc==4){
-        if(strlen(argv[1]) ==2){
+    if(argc==4){
+        if(strlen(argv[1]) == 2){ // change condition to compare with "-r"
            numOfWrappingThreads = 1;
            numOfDirectoryThreads = 1;
         } else if(strlen(argv[1]) == 3){
-           numOfWrappingThreads = atoi(argv[1]);
+           numOfWrappingThreads = argv[1][2] - '0';
            numOfDirectoryThreads = 1;
         } else if(strlen(argv[1]) == 5){
            numOfWrappingThreads = argv[1][4] - '0';
@@ -331,12 +336,14 @@ int main(int argc, char **argv)
         init_queue(fileQueue);
 
         struct pathName *path = (struct pathName *)malloc(sizeof(struct pathName));
+
         path->prefix = "";
         path->fileName = argv[2];
 
         char *rootPath = getInputName(path);
         
         enqueue(dirQueue, rootPath);
+
         for(int i = 0; i<numOfDirectoryThreads; i++){
             pthread_create(&dirThreads[i], NULL, dirWorker, argv);
         }
@@ -352,6 +359,7 @@ int main(int argc, char **argv)
         }
         free(dirQueue);
         free(fileQueue);
+        free(path);
 //    } else {
 //         if(argc>1){
 //             for(int i = 0; i < strlen(argv[1]); i++){ //check if length argument is a number
