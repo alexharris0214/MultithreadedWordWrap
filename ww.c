@@ -279,16 +279,17 @@ struct pathName *dequeue(struct queue *queue){
 
 void *fileWorker(void * arg){
     struct workerArguments *args = (struct workerArguments*) arg;
-    while(!dirQueue->closed || fileQueue->start != NULL){
-        printf("dequeueing in %d\n", pthread_self());
+    while(!dirQueue->closed || fileQueue->start != NULL || activeDThreads){
+        //printf("dequeueing in %d\n", pthread_self());
         struct pathName *dequeuedFile = dequeue(fileQueue);
 
         if(dequeuedFile == NULL)
             break;
 
-        printf("here4 in %d\n", pthread_self());
         char *inFile = getInputName(dequeuedFile);
         char *outFile = getOutputName(dequeuedFile);
+        free(dequeuedFile->fileName);
+        free(dequeuedFile->prefix);
         free(dequeuedFile);
 
         int inFD = open(inFile, O_RDONLY);
@@ -315,12 +316,19 @@ void *dirWorker(void * arg){
     while(!dirQueue->closed || dirQueue->start != NULL || activeDThreads){
         struct dirent *dp;
         struct stat statbuf; // Holds file information to determine its type
-        
 
         // ADD MUTEX FOR ACTIVE THREADS AND EXIT STATUS
 
         struct pathName *dequeuedFile = dequeue(dirQueue);
+
+        if(dequeuedFile == NULL)
+            break; //FIXME: make wait for end signal?
+
         char *currDir = getInputName(dequeuedFile);
+        free(dequeuedFile->fileName);
+        free(dequeuedFile->prefix);
+        free(dequeuedFile);
+
         DIR *dr = opendir(currDir);
         
         pthread_mutex_lock(&dirQueue->lock);
@@ -336,8 +344,10 @@ void *dirWorker(void * arg){
             newPath = (struct pathName *)malloc(sizeof(struct pathName));
 
             // checking to see if a file or directory was read
-            newPath->prefix = currDir;
-            newPath->fileName = dp->d_name;
+            newPath->prefix = (char *)malloc(sizeof(char)*(strlen(currDir) + 1));
+            newPath->fileName = (char *)malloc(sizeof(char)*(strlen(dp->d_name) + 1));
+            memcpy(newPath->fileName, dp->d_name, strlen(dp->d_name) + 1);
+            memcpy(newPath->prefix, currDir, strlen(currDir) + 1);
             char *newFileName = getInputName(newPath);
 
             stat(newFileName, &statbuf);
@@ -345,13 +355,13 @@ void *dirWorker(void * arg){
             if(S_ISDIR(statbuf.st_mode)){
                 enqueue(dirQueue, newPath);
             } else {
-                printf("%d enqueueing: %s\n", pthread_self(), newFileName);
+                //printf("%d enqueueing: %s\n", pthread_self(), newFileName);
                 enqueue(fileQueue, newPath);
             }
             free(newFileName);
         }
-
-        free(dequeuedFile);
+        closedir(dr);
+        free(currDir);
 
         pthread_mutex_lock(&dirQueue->lock);
         activeDThreads--;
@@ -373,10 +383,10 @@ int main(int argc, char **argv)
     int err; // Variable to store error information
     int exitFlag = EXIT_SUCCESS; //determine what exit status we return
 
-    int numOfWrappingThreads = 3;
-    int numOfDirectoryThreads = 2;
+    int numOfWrappingThreads;
+    int numOfDirectoryThreads;
          
-    dirQueue = (struct queue *)malloc(sizeof(struct queue));
+    /*dirQueue = (struct queue *)malloc(sizeof(struct queue));
     fileQueue = (struct queue *)malloc(sizeof(struct queue));
 
     init_queue(dirQueue);
@@ -384,8 +394,13 @@ int main(int argc, char **argv)
 
     struct pathName *path = (struct pathName *)malloc(sizeof(struct pathName));
 
-    path->prefix = "\0";
-    path->fileName = "moreExamples"; 
+    //FIXME: make the third argument work for any directory, even if it has a prefix
+
+    path->prefix = (char *)malloc(1);
+    path->fileName = (char *)malloc(strlen(argv[3]) + 1); 
+    memset(path->prefix, '\0', 1);
+    memcpy(path->fileName, argv[3], strlen(argv[3]));
+    memset(path->fileName + strlen(argv[3]), '\0', 1);
 
     enqueue(dirQueue, path);
 
@@ -414,25 +429,23 @@ int main(int argc, char **argv)
     pthread_mutex_destroy(&dirQueue->lock);
     free(dirQueue);
     free(fileQueue);
-    free(args);
-
-    //FIXME: create worker arg array infrastructure
+    free(args);/*
     /*
     * checking to see if arguments were passed in before accessing
     * returns exit failure if no arguments were passed in 
     */
-    /*if(argc==4){
-        if(strlen(argv[1]) == 2){ // change condition to compare with "-r"
+    if(argc==4){
+        if(strlen(argv[1]) == 2){ //-r
            numOfWrappingThreads = 1;
            numOfDirectoryThreads = 1;
-        } else if(strlen(argv[1]) == 3){
+        } else if(strlen(argv[1]) == 3){ //-rN
            numOfWrappingThreads = argv[1][2] - '0';
            numOfDirectoryThreads = 1;
-        } else if(strlen(argv[1]) == 5){
+        } else if(strlen(argv[1]) == 5){ //-rM,N
            numOfWrappingThreads = argv[1][4] - '0';
            numOfDirectoryThreads = argv[1][2] - '0';
         } else {
-           puts("Invalid argument for thread mode");
+           puts("Invalid argument for thread mode.");
            return EXIT_FAILURE;
         }
 
@@ -444,18 +457,24 @@ int main(int argc, char **argv)
         init_queue(dirQueue);
         init_queue(fileQueue);
 
+        struct workerArguments *args = malloc(sizeof(struct workerArguments));
+        args->lineLength = atoi(argv[2]);
+
         struct pathName *path = (struct pathName *)malloc(sizeof(struct pathName));
 
-        path->prefix = "";
-        path->fileName = argv[3];
-        
+        path->prefix = (char *)malloc(1);
+        path->fileName = (char *)malloc(strlen(argv[3]) + 1); 
+        memset(path->prefix, '\0', 1);
+        memcpy(path->fileName, argv[3], strlen(argv[3]));
+        memset(path->fileName + strlen(argv[3]), '\0', 1);                    //FIXME: make a FREEME struct to free all dynamically allocated variables at the end so this doesn't happen
+
         enqueue(dirQueue, path);
 
         for(int i = 0; i<numOfDirectoryThreads; i++){
-            pthread_create(&dirThreads[i], NULL, dirWorker, argv);
+            pthread_create(&dirThreads[i], NULL, dirWorker, args);
         }
         for(int i = 0; i<numOfWrappingThreads; i++){
-            pthread_create(&wrapperThreads[i], NULL, fileWorker, argv);
+            pthread_create(&wrapperThreads[i], NULL, fileWorker, args);
         }
         //FIXME: check for all waiting threads to terminate all at once
         for(int i = 0; i<numOfDirectoryThreads; i++){
@@ -464,9 +483,14 @@ int main(int argc, char **argv)
         for(int i = 0; i<numOfWrappingThreads; i++){
             pthread_join(wrapperThreads[i], NULL);
         }
+        
+        pthread_cond_destroy(&fileQueue->dequeue_ready);
+        pthread_cond_destroy(&dirQueue->dequeue_ready);
+        pthread_mutex_destroy(&fileQueue->lock);
+        pthread_mutex_destroy(&dirQueue->lock);
         free(dirQueue);
         free(fileQueue);
-        free(path);
+        free(args);
 //    } else {
 //         if(argc>1){
 //             for(int i = 0; i < strlen(argv[1]); i++){ //check if length argument is a number
@@ -552,5 +576,5 @@ int main(int argc, char **argv)
 //             return EXIT_FAILURE;
 //         }
 //         return exitFlag;
-//   }
+   }
 }
