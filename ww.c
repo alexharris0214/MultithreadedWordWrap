@@ -30,6 +30,10 @@ struct queue {
     int closed;
 } *fileQueue, *dirQueue;
 
+struct workerArguments {
+    int lineLength;
+};
+
 void queue_close(struct queue *queue){
     pthread_mutex_lock(&queue->lock);
 
@@ -280,6 +284,7 @@ struct pathName *dequeue(struct queue *queue){
 }
 
 void *fileWorker(void * arg){
+    struct workerArguments *args = (struct workerArguments*) arg;
     while(!dirQueue->closed || fileQueue->start != NULL){
         printf("dequeueing in %d\n", pthread_self());
         struct pathName *dequeuedFile = dequeue(fileQueue);
@@ -304,7 +309,7 @@ void *fileWorker(void * arg){
         }
 
         // reformatting file
-        normalize(inFD, 20, outFD); //FIXME: make global exit status with mutex to keep track of normalize() exit status
+        normalize(inFD, args->lineLength, outFD); //FIXME: make global exit status with mutex to keep track of normalize() exit status
         close(inFD);
         close(outFD);
     }
@@ -392,11 +397,14 @@ int main(int argc, char **argv)
     pthread_t wrapperThreads[numOfWrappingThreads];
     pthread_t directoryThreads[numOfDirectoryThreads];
 
-    pthread_create(&directoryThreads[0], NULL, dirWorker, NULL);
+    struct workerArguments *args = malloc(sizeof(struct workerArguments));
+    args->lineLength = atoi(argv[2]);
 
-    pthread_create(&wrapperThreads[0], NULL, fileWorker, NULL);
-    pthread_create(&wrapperThreads[1], NULL, fileWorker, NULL);
-    pthread_create(&wrapperThreads[2], NULL, fileWorker, NULL);
+    pthread_create(&directoryThreads[0], NULL, dirWorker, args);
+
+    pthread_create(&wrapperThreads[0], NULL, fileWorker, args);
+    pthread_create(&wrapperThreads[1], NULL, fileWorker, args);
+    pthread_create(&wrapperThreads[2], NULL, fileWorker, args);
 
     pthread_join(directoryThreads[0], NULL);
     pthread_join(wrapperThreads[0], NULL);
