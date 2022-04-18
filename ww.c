@@ -247,7 +247,6 @@ void enqueue(struct queue *queue, struct pathName *file){
 
 struct pathName *dequeue(struct queue *queue){
     pthread_mutex_lock(&queue->lock);
-        printf("here: %d\n", pthread_self());
 
         //cond_wait for dequeue->ready
         //set a temp value to current queue->start ; we will use this temp value to return later
@@ -257,24 +256,19 @@ struct pathName *dequeue(struct queue *queue){
 
         while(queue->start == NULL){
             if(dirQueue->closed){
-                printf("here2 %d\n", pthread_self());
                 pthread_mutex_unlock(&queue->lock);
                 return NULL;
             }
-            printf("here3 %d\n", pthread_self());
             pthread_cond_wait(&queue->dequeue_ready, &queue->lock);
         }
 
         struct node *temp = queue->start;
 
-        printf("%d in %d\n", temp, pthread_self());
-
+        if(queue->start = queue->end)
+            queue->end = temp->next;
         queue->start = temp->next;
 
         struct pathName *dequeuedFile = temp->path;
-        char *inputname = getInputName(dequeuedFile);
-        printf("%s in %d\n", inputname, pthread_self());
-        free(inputname);
         
         free(temp);
 
@@ -336,7 +330,6 @@ void *dirWorker(void * arg){
         // iterating through current directory    
         struct pathName *newPath;
         while((dp = readdir(dr)) != NULL){
-            stat(dp, &statbuf);
             if(strstr(dp->d_name, ".") == dp->d_name || strstr(dp->d_name, "wrap.") == dp->d_name){
                 continue;
             }
@@ -345,18 +338,20 @@ void *dirWorker(void * arg){
             // checking to see if a file or directory was read
             newPath->prefix = currDir;
             newPath->fileName = dp->d_name;
+            char *newFileName = getInputName(newPath);
+
+            stat(newFileName, &statbuf);
+        
             if(S_ISDIR(statbuf.st_mode)){
                 enqueue(dirQueue, newPath);
             } else {
-                char *test = getInputName(newPath);
-                printf("%d enqueueing: %s\n", pthread_self(), test);
-                free(test);
+                printf("%d enqueueing: %s\n", pthread_self(), newFileName);
                 enqueue(fileQueue, newPath);
             }
+            free(newFileName);
         }
 
         free(dequeuedFile);
-        free(currDir);
 
         pthread_mutex_lock(&dirQueue->lock);
         activeDThreads--;
@@ -379,7 +374,7 @@ int main(int argc, char **argv)
     int exitFlag = EXIT_SUCCESS; //determine what exit status we return
 
     int numOfWrappingThreads = 3;
-    int numOfDirectoryThreads = 1;
+    int numOfDirectoryThreads = 2;
          
     dirQueue = (struct queue *)malloc(sizeof(struct queue));
     fileQueue = (struct queue *)malloc(sizeof(struct queue));
@@ -401,12 +396,14 @@ int main(int argc, char **argv)
     args->lineLength = atoi(argv[2]);
 
     pthread_create(&directoryThreads[0], NULL, dirWorker, args);
+    pthread_create(&directoryThreads[1], NULL, dirWorker, args);
 
     pthread_create(&wrapperThreads[0], NULL, fileWorker, args);
     pthread_create(&wrapperThreads[1], NULL, fileWorker, args);
     pthread_create(&wrapperThreads[2], NULL, fileWorker, args);
 
     pthread_join(directoryThreads[0], NULL);
+    pthread_join(directoryThreads[1], NULL);
     pthread_join(wrapperThreads[0], NULL);
     pthread_join(wrapperThreads[1], NULL);
     pthread_join(wrapperThreads[2], NULL);
@@ -417,6 +414,7 @@ int main(int argc, char **argv)
     pthread_mutex_destroy(&dirQueue->lock);
     free(dirQueue);
     free(fileQueue);
+    free(args);
 
     //FIXME: create worker arg array infrastructure
     /*
