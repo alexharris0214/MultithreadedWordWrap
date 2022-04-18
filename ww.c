@@ -69,14 +69,22 @@ char *getInputName(struct pathName *file){
 char *getOutputName(struct pathName *file){
     int plen = strlen(file->prefix);
     int nlen = strlen(file->fileName);
-    char *outputName = (char *)malloc(sizeof(char)*(plen + nlen + 6));
-    
     char wrap[] = {'w','r','a','p','.'};
-
-    memcpy(outputName, file->prefix, plen);
-    memcpy(outputName + plen, wrap, 5);
-    memcpy(outputName + plen + 5, file->fileName, nlen);
-    memset(outputName + plen + nlen + 5, '\0', 1);
+    char *outputName;
+    
+    if(plen != 0){
+        outputName = (char *)malloc(sizeof(char)*(plen + nlen + 7));
+        memcpy(outputName, file->prefix, plen);
+        outputName[plen] = '/';
+        memcpy(outputName + plen + 1, wrap, 5);
+        memcpy(outputName + plen + 6, file->fileName, nlen);
+        outputName[plen + nlen + 6] = '\0';
+    } else {
+        outputName = (char *)malloc(sizeof(char)*(nlen + 6));
+        memcpy(outputName, wrap, 5);
+        memcpy(outputName + 5, file->fileName, nlen);
+        outputName[nlen + 5] = '\0';
+    }
 
     return outputName;
 }
@@ -235,6 +243,7 @@ void enqueue(struct queue *queue, struct pathName *file){
 
 struct pathName *dequeue(struct queue *queue){
     pthread_mutex_lock(&queue->lock);
+        printf("here: %d\n", pthread_self());
 
         //cond_wait for dequeue->ready
         //set a temp value to current queue->start ; we will use this temp value to return later
@@ -242,14 +251,26 @@ struct pathName *dequeue(struct queue *queue){
         //save pathname of temp
         //free temp
 
-        while(queue->start == NULL)
+        while(queue->start == NULL){
+            if(dirQueue->closed){
+                printf("here2 %d\n", pthread_self());
+                pthread_mutex_unlock(&queue->lock);
+                return NULL;
+            }
+            printf("here3 %d\n", pthread_self());
             pthread_cond_wait(&queue->dequeue_ready, &queue->lock);
+        }
 
         struct node *temp = queue->start;
+
+        printf("%d in %d\n", temp, pthread_self());
 
         queue->start = temp->next;
 
         struct pathName *dequeuedFile = temp->path;
+        char *inputname = getInputName(dequeuedFile);
+        printf("%s in %d\n", inputname, pthread_self());
+        free(inputname);
         
         free(temp);
 
@@ -260,7 +281,13 @@ struct pathName *dequeue(struct queue *queue){
 
 void *fileWorker(void * arg){
     while(!dirQueue->closed || fileQueue->start != NULL){
+        printf("dequeueing in %d\n", pthread_self());
         struct pathName *dequeuedFile = dequeue(fileQueue);
+
+        if(dequeuedFile == NULL)
+            break;
+
+        printf("here4 in %d\n", pthread_self());
         char *inFile = getInputName(dequeuedFile);
         char *outFile = getOutputName(dequeuedFile);
         free(dequeuedFile);
@@ -281,6 +308,7 @@ void *fileWorker(void * arg){
         close(inFD);
         close(outFD);
     }
+    //FIXME: make all workers end simultaneously
     return;
 }
 
@@ -288,6 +316,7 @@ void *dirWorker(void * arg){
     while(!dirQueue->closed || dirQueue->start != NULL || activeDThreads){
         struct dirent *dp;
         struct stat statbuf; // Holds file information to determine its type
+        
 
         // ADD MUTEX FOR ACTIVE THREADS AND EXIT STATUS
 
@@ -299,10 +328,14 @@ void *dirWorker(void * arg){
         activeDThreads++;
         pthread_mutex_unlock(&dirQueue->lock);
 
-        // iterating through current directory
-        struct pathName *newPath = (struct pathName *)malloc(sizeof(struct pathName));
+        // iterating through current directory    
+        struct pathName *newPath;
         while((dp = readdir(dr)) != NULL){
             stat(dp, &statbuf);
+            if(strstr(dp->d_name, ".") == dp->d_name || strstr(dp->d_name, "wrap.") == dp->d_name){
+                continue;
+            }
+            newPath = (struct pathName *)malloc(sizeof(struct pathName));
 
             // checking to see if a file or directory was read
             newPath->prefix = currDir;
@@ -310,6 +343,9 @@ void *dirWorker(void * arg){
             if(S_ISDIR(statbuf.st_mode)){
                 enqueue(dirQueue, newPath);
             } else {
+                char *test = getInputName(newPath);
+                printf("%d enqueueing: %s\n", pthread_self(), test);
+                free(test);
                 enqueue(fileQueue, newPath);
             }
         }
@@ -324,6 +360,8 @@ void *dirWorker(void * arg){
         if(!activeDThreads && dirQueue->start == NULL)
             queue_close(dirQueue);
    }
+   //FIXME: make all workers end simultaneously
+   return;
 }
 
 int main(int argc, char **argv)
