@@ -212,7 +212,7 @@ void init_queue(struct queue *queue){
     queue->start = NULL;
     queue->end = NULL;
     queue->closed = 0;
-    pthread_cond_init(&queue->lock, NULL);
+    pthread_mutex_init(&queue->lock, NULL);
     pthread_cond_init(&queue->dequeue_ready, NULL);
 }
 
