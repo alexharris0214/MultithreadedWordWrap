@@ -173,8 +173,7 @@ int normalize(int inputFD, int lineLength, int outputFD){
             }
         }
         // Resetting the buffer before reassigning to it
-        memset(buffer, '\0', sizeof(buffer));
-            
+        memset(buffer, '\0', sizeof(buffer));            
         bytesRead = read(inputFD, buffer, BUFFER_SIZE);
     }
 
