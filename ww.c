@@ -278,7 +278,7 @@ struct pathName *dequeue(struct queue *queue){
 
 void *fileWorker(void * arg){
     struct workerArguments *args = (struct workerArguments*) arg;
-    while(!dirQueue->closed || fileQueue->start != NULL || activeDThreads){
+    while(!dirQueue->closed || fileQueue->start != NULL){
         //printf("dequeueing in %d\n", pthread_self());
         struct pathName *dequeuedFile = dequeue(fileQueue);
 
@@ -307,12 +307,11 @@ void *fileWorker(void * arg){
         close(inFD);
         close(outFD);
     }
-    //FIXME: make all workers end simultaneously
     return;
 }
 
 void *dirWorker(void * arg){
-    while(!dirQueue->closed || dirQueue->start != NULL || activeDThreads){
+    while(dirQueue->start != NULL || activeDThreads){
         struct dirent *dp;
         struct stat statbuf; // Holds file information to determine its type
 
