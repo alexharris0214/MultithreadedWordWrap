@@ -279,7 +279,7 @@ struct pathName *dequeue(struct queue *queue){
 
 void *fileWorker(void * arg){
     struct workerArguments *args = (struct workerArguments*) arg;
-    while(!dirQueue->closed || fileQueue->start != NULL){
+    while(!dirQueue->closed || fileQueue->start != NULL || activeDThreads){
         //printf("dequeueing in %d\n", pthread_self());
         struct pathName *dequeuedFile = dequeue(fileQueue);
 
@@ -308,20 +308,21 @@ void *fileWorker(void * arg){
         close(inFD);
         close(outFD);
     }
+    //FIXME: make all workers end simultaneously 
     return;
 }
 
 void *dirWorker(void * arg){
-    while(dirQueue->start != NULL || activeDThreads){
+    struct pathName *dequeuedFile;
+    while(dequeuedFile = dequeue(dirQueue)){
+        pthread_mutex_lock(&dirQueue->lock);
+        activeDThreads++;
+        pthread_mutex_unlock(&dirQueue->lock);
+
         struct dirent *dp;
         struct stat statbuf; // Holds file information to determine its type
 
         // ADD MUTEX FOR ACTIVE THREADS AND EXIT STATUS
-
-        struct pathName *dequeuedFile = dequeue(dirQueue);
-
-        if(dequeuedFile == NULL)
-            break; //FIXME: make wait for end signal?
 
         char *currDir = getInputName(dequeuedFile);
         free(dequeuedFile->fileName);
@@ -329,10 +330,6 @@ void *dirWorker(void * arg){
         free(dequeuedFile);
 
         DIR *dr = opendir(currDir);
-        
-        pthread_mutex_lock(&dirQueue->lock);
-        activeDThreads++;
-        pthread_mutex_unlock(&dirQueue->lock);
 
         // iterating through current directory    
         struct pathName *newPath;
@@ -387,35 +384,25 @@ int main(int argc, char **argv)
          
     /*dirQueue = (struct queue *)malloc(sizeof(struct queue));
     fileQueue = (struct queue *)malloc(sizeof(struct queue));
-
     init_queue(dirQueue);
     init_queue(fileQueue);
-
     struct pathName *path = (struct pathName *)malloc(sizeof(struct pathName));
-
     //FIXME: make the third argument work for any directory, even if it has a prefix
-
     path->prefix = (char *)malloc(1);
     path->fileName = (char *)malloc(strlen(argv[3]) + 1); 
     memset(path->prefix, '\0', 1);
     memcpy(path->fileName, argv[3], strlen(argv[3]));
     memset(path->fileName + strlen(argv[3]), '\0', 1);
-
     enqueue(dirQueue, path);
-
     pthread_t wrapperThreads[numOfWrappingThreads];
     pthread_t directoryThreads[numOfDirectoryThreads];
-
     struct workerArguments *args = malloc(sizeof(struct workerArguments));
     args->lineLength = atoi(argv[2]);
-
     pthread_create(&directoryThreads[0], NULL, dirWorker, args);
     pthread_create(&directoryThreads[1], NULL, dirWorker, args);
-
     pthread_create(&wrapperThreads[0], NULL, fileWorker, args);
     pthread_create(&wrapperThreads[1], NULL, fileWorker, args);
     pthread_create(&wrapperThreads[2], NULL, fileWorker, args);
-
     pthread_join(directoryThreads[0], NULL);
     pthread_join(directoryThreads[1], NULL);
     pthread_join(wrapperThreads[0], NULL);
