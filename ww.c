@@ -222,9 +222,10 @@ void enqueue(struct queue *queue, struct pathName *file){
 
         // checking to see if malloc returned correctly
         if(new == NULL){
-            return EXIT_FAILURE;
+            puts("Failed to malloc new node for enqueue");
+            return;
         }
-        // allocating new node (temp) accordingly
+        // allocating new node accordingly
         new->next = NULL;
         new->path = file;
         
@@ -239,6 +240,7 @@ void enqueue(struct queue *queue, struct pathName *file){
         }
         
         pthread_cond_signal(&queue->dequeue_ready);
+        //printf("Thread %d successfully enqueued file %s\n", pthread_self(), getInputName(file));
 
     pthread_mutex_unlock(&queue->lock);
     return;
@@ -263,13 +265,15 @@ struct pathName *dequeue(struct queue *queue){
 
         struct node *temp = queue->start;
 
-        if(queue->start = queue->end)
+        if(queue->start == queue->end)
             queue->end = temp->next;
         queue->start = temp->next;
 
         struct pathName *dequeuedFile = temp->path;
         
         free(temp);
+
+        //printf("Thread %d successfully dequeued file %s\n", pthread_self(), getInputName(dequeuedFile));
 
     pthread_mutex_unlock(&queue->lock);
 
@@ -278,11 +282,11 @@ struct pathName *dequeue(struct queue *queue){
 
 void *fileWorker(void * arg){
     struct workerArguments *args = (struct workerArguments*) arg;
-    while(!dirQueue->closed || fileQueue->start != NULL || activeDThreads){
+    while(!dirQueue->closed || fileQueue->start != NULL){
         //printf("dequeueing in %d\n", pthread_self());
         struct pathName *dequeuedFile = dequeue(fileQueue);
 
-        if(dequeuedFile == NULL)
+        if(dequeuedFile == NULL)         //if dequeue fails, fileWorker can exit
             break;
 
         char *inFile = getInputName(dequeuedFile);
@@ -290,6 +294,9 @@ void *fileWorker(void * arg){
         free(dequeuedFile->fileName);
         free(dequeuedFile->prefix);
         free(dequeuedFile);
+
+        //printf("FileWorker thread %d dequeued file: %s\n", pthread_self(), inFile);
+        //printf("FileQueue->start = %s\n", getInputName(fileQueue->start->path));
 
         int inFD = open(inFile, O_RDONLY);
         int outFD = open(outFile, O_WRONLY|O_CREAT|O_TRUNC, 0700);
@@ -307,7 +314,6 @@ void *fileWorker(void * arg){
         close(inFD);
         close(outFD);
     }
-    //FIXME: make all workers end simultaneously 
     return;
 }
 
@@ -321,7 +327,7 @@ void *dirWorker(void * arg){
         struct dirent *dp;
         struct stat statbuf; // Holds file information to determine its type
 
-        // ADD MUTEX FOR ACTIVE THREADS AND EXIT STATUS
+        // ADD MUTEX FOR ACTIVE THREADS AND EXIT STATUS?
 
         char *currDir = getInputName(dequeuedFile);
         free(dequeuedFile->fileName);
@@ -348,9 +354,11 @@ void *dirWorker(void * arg){
             stat(newFileName, &statbuf);
         
             if(S_ISDIR(statbuf.st_mode)){
+                //printf("Thread %d enqueueing dir: %s\n", pthread_self(), dp->d_name);
                 enqueue(dirQueue, newPath);
             } else {
                 //printf("%d enqueueing: %s\n", pthread_self(), newFileName);
+                //printf("Thread %d enqueueing file: %s\n", pthread_self(), dp->d_name);
                 enqueue(fileQueue, newPath);
             }
             free(newFileName);
@@ -360,12 +368,16 @@ void *dirWorker(void * arg){
 
         pthread_mutex_lock(&dirQueue->lock);
         activeDThreads--;
-        pthread_mutex_unlock(&dirQueue->lock);
-
-        if(!activeDThreads && dirQueue->start == NULL)
+        //printf("Thread %d decremented # active dir threads. Active count: %d\n", pthread_self(), activeDThreads);
+        if(!activeDThreads && dirQueue->start == NULL){
+            printf("Thread %d closing dir queue. Clock: %d \n", pthread_self(), clock());
+            pthread_mutex_unlock(&dirQueue->lock);
             queue_close(dirQueue);
+        } else {
+            pthread_mutex_unlock(&dirQueue->lock);
+        }
    }
-   //FIXME: make all workers end simultaneously
+   printf("DirThread %d exiting. Clock: %d\n", pthread_self(), clock());
    return;
 }
 
@@ -461,7 +473,6 @@ int main(int argc, char **argv)
         for(int i = 0; i<numOfWrappingThreads; i++){
             pthread_create(&wrapperThreads[i], NULL, fileWorker, args);
         }
-        //FIXME: check for all waiting threads to terminate all at once
         for(int i = 0; i<numOfDirectoryThreads; i++){
             pthread_join(dirThreads[i], NULL);
         }
