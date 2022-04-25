@@ -30,10 +30,6 @@ struct queue {
     int closed;
 } *fileQueue, *dirQueue;
 
-struct workerArguments {
-    int lineLength;
-};
-
 void queue_close(struct queue *queue){
     pthread_mutex_lock(&queue->lock);
 
@@ -281,7 +277,7 @@ struct pathName *dequeue(struct queue *queue){
 }
 
 void *fileWorker(void * arg){
-    struct workerArguments *args = (struct workerArguments*) arg;
+    int lineLength = (int)atoi(arg);
     while(!dirQueue->closed || fileQueue->start != NULL){
         //printf("dequeueing in %d\n", pthread_self());
         struct pathName *dequeuedFile = dequeue(fileQueue);
@@ -305,15 +301,16 @@ void *fileWorker(void * arg){
         free(outFile);
 
         if(inFD <= 0 || outFD <= 0){ // checking to see if file is opened successfully
-        puts("ERROR: Could not open a file.\n");
+        puts("ERROR: Could not open a file.");
             return EXIT_FAILURE;            //FIXME: make this change the global exit status using mutex
         }
 
         // reformatting file
-        normalize(inFD, args->lineLength, outFD); //FIXME: make global exit status with mutex to keep track of normalize() exit status
+        normalize(inFD, lineLength, outFD); //FIXME: make global exit status with mutex to keep track of normalize() exit status
         close(inFD);
         close(outFD);
     }
+    printf("FileThread %d exiting. Clock: %d\n", pthread_self(), clock());
     return;
 }
 
@@ -334,7 +331,7 @@ void *dirWorker(void * arg){
         free(dequeuedFile->prefix);
         free(dequeuedFile);
 
-        DIR *dr = opendir(currDir);
+        DIR *dr = opendir(currDir); //FIXME: check if dir opened successfully and update exitFlag
 
         // iterating through current directory    
         struct pathName *newPath;
@@ -378,17 +375,17 @@ void *dirWorker(void * arg){
         }
    }
    printf("DirThread %d exiting. Clock: %d\n", pthread_self(), clock());
-   return;
+   return NULL;
 }
 
 int main(int argc, char **argv)
 {
-    int fd = -1; // File pointer
-    DIR *dr = NULL; // Directory pointer
-    struct stat statbuf; // Holds file information to determine its type
-    struct dirent *dp;  // Temp variable to hold individual temp entries
-    int err; // Variable to store error information
-    int exitFlag = EXIT_SUCCESS; //determine what exit status we return
+    //int fd = -1; // File pointer
+    //DIR *dr = NULL; // Directory pointer
+    //struct stat statbuf; // Holds file information to determine its type
+    //struct dirent *dp;  // Temp variable to hold individual temp entries
+    //int err; // Variable to store error information
+    //int exitFlag = EXIT_SUCCESS; //determine what exit status we return
 
     int numOfWrappingThreads;
     int numOfDirectoryThreads;
@@ -432,18 +429,55 @@ int main(int argc, char **argv)
     * returns exit failure if no arguments were passed in 
     */
     if(argc==4){
-        if(strlen(argv[1]) == 2){ //-r
-           numOfWrappingThreads = 1;
-           numOfDirectoryThreads = 1;
-        } else if(strlen(argv[1]) == 3){ //-rN
-           numOfWrappingThreads = argv[1][2] - '0';
-           numOfDirectoryThreads = 1;
-        } else if(strlen(argv[1]) == 5){ //-rM,N
-           numOfWrappingThreads = argv[1][4] - '0';
-           numOfDirectoryThreads = argv[1][2] - '0';
-        } else {
-           puts("Invalid argument for thread mode.");
-           return EXIT_FAILURE;
+        if(!strcmp(argv[1], "-r")){ 
+            numOfWrappingThreads = 1;
+            numOfDirectoryThreads = 1;
+        } else { 
+            if(strstr(argv[1], "-r") != argv[1]){   //Check if thread argument does not start with -r
+                puts("Invalid argument for thread mode.");
+                return EXIT_FAILURE;
+            }
+            //at this point, thread argument must have started with -r but is not just "-r"
+            
+            int numsLen = strlen((char *)&argv[1][2]);
+            char *argStr = (char *)malloc(sizeof(char)*(numsLen + 1));
+            memcpy(argStr, &argv[1][2], numsLen);
+            memset(argStr + numsLen, '\0', 1);
+
+            if(!strstr(argStr, ",")){ //if it does not contain a comma, must have only one number
+
+                //-rN     ;   N = wrappers
+                numOfDirectoryThreads = 1;
+                numOfWrappingThreads = atoi(argStr);
+                printf("%s %d\n", argStr, atoi(argStr));
+                
+                free(argStr);
+                if(numOfWrappingThreads <= 0){
+                    puts("Thread mode argument requires at least one non-negative, non-zero integer.");
+                    return EXIT_FAILURE;
+                }
+            } else {   //if it does contain a comma, must have exactly two numbers
+
+                char *token = strtok(argStr, ",");  
+                char *temp = token;
+                token = strtok(NULL, ","); //strtok() returns null if cannot be split
+                
+                if(token == NULL){ 
+                    puts("Thread mode argument must have one integer or two integers separated by a comma.");
+                    return EXIT_FAILURE;
+                }
+
+                //-rM,N    ;   M = directories  N = wrappers
+                numOfDirectoryThreads = atoi(temp); //atoi() returns 0 if argument is not a number
+
+                numOfWrappingThreads = atoi(token);
+
+                free(argStr);
+                if(numOfDirectoryThreads <= 0 || numOfWrappingThreads <= 0){      //if num <= 0, then the thread arg number is too small or it was not a number
+                    puts("Thread mode argument requires non-negative, non-zero integers.");
+                    return EXIT_FAILURE;
+                }
+            }
         }
 
         pthread_t wrapperThreads[numOfWrappingThreads];
@@ -453,9 +487,6 @@ int main(int argc, char **argv)
         fileQueue = (struct queue *)malloc(sizeof(struct queue));          
         init_queue(dirQueue);
         init_queue(fileQueue);
-
-        struct workerArguments *args = malloc(sizeof(struct workerArguments));
-        args->lineLength = atoi(argv[2]);
 
         struct pathName *path = (struct pathName *)malloc(sizeof(struct pathName));
 
@@ -468,10 +499,10 @@ int main(int argc, char **argv)
         enqueue(dirQueue, path);
 
         for(int i = 0; i<numOfDirectoryThreads; i++){
-            pthread_create(&dirThreads[i], NULL, dirWorker, args);
+            pthread_create(&dirThreads[i], NULL, dirWorker, NULL);
         }
         for(int i = 0; i<numOfWrappingThreads; i++){
-            pthread_create(&wrapperThreads[i], NULL, fileWorker, args);
+            pthread_create(&wrapperThreads[i], NULL, fileWorker, argv[2]);
         }
         for(int i = 0; i<numOfDirectoryThreads; i++){
             pthread_join(dirThreads[i], NULL);
@@ -486,7 +517,6 @@ int main(int argc, char **argv)
         pthread_mutex_destroy(&dirQueue->lock);
         free(dirQueue);
         free(fileQueue);
-        free(args);
 //    } else {
 //         if(argc>1){
 //             for(int i = 0; i < strlen(argv[1]); i++){ //check if length argument is a number
