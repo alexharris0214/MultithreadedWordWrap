@@ -248,12 +248,6 @@ void enqueue(struct queue *queue, struct pathName *file){
 struct pathName *dequeue(struct queue *queue){
     pthread_mutex_lock(&queue->lock);
 
-        //cond_wait for dequeue->ready
-        //set a temp value to current queue->start ; we will use this temp value to return later
-        //set queue->start to temp->next
-        //save pathname of temp
-        //free temp
-
         while(queue->start == NULL){
             if(dirQueue->closed){
                 pthread_mutex_unlock(&queue->lock);
@@ -281,21 +275,14 @@ struct pathName *dequeue(struct queue *queue){
 
 void *fileWorker(void * arg){
     int lineLength = (int)arg;
-    while(!dirQueue->closed || fileQueue->start != NULL){
-        //printf("dequeueing in %d\n", pthread_self());
-        struct pathName *dequeuedFile = dequeue(fileQueue);
-
-        if(dequeuedFile == NULL)         //if dequeue fails, fileWorker can exit
-            break;
+    struct pathName *dequeuedFile;
+    while(dequeuedFile = dequeue(fileQueue)){
 
         char *inFile = getInputName(dequeuedFile);
         char *outFile = getOutputName(dequeuedFile);
         free(dequeuedFile->fileName);
         free(dequeuedFile->prefix);
         free(dequeuedFile);
-
-        //printf("FileWorker thread %d dequeued file: %s\n", pthread_self(), inFile);
-        //printf("FileQueue->start = %s\n", getInputName(fileQueue->start->path));
 
         int inFD = open(inFile, O_RDONLY);
         free(inFile);
@@ -380,11 +367,8 @@ void *dirWorker(void * arg){
             stat(newFileName, &statbuf);
         
             if(S_ISDIR(statbuf.st_mode)){
-                //printf("Thread %d enqueueing dir: %s\n", pthread_self(), dp->d_name);
                 enqueue(dirQueue, newPath);
             } else {
-                //printf("%d enqueueing: %s\n", pthread_self(), newFileName);
-                //printf("Thread %d enqueueing file: %s\n", pthread_self(), dp->d_name);
                 enqueue(fileQueue, newPath);
             }
             free(newFileName);
@@ -396,7 +380,6 @@ void *dirWorker(void * arg){
         pthread_mutex_lock(&dirQueue->lock);         
         activeDThreads->status--;
         if(!activeDThreads->status && dirQueue->start == NULL){
-            //printf("Thread %d closing dir queue. Clock: %d \n", pthread_self(), clock());
             pthread_mutex_unlock(&dirQueue->lock);
             pthread_mutex_unlock(&activeDThreads->lock);
             queue_close(dirQueue);
@@ -415,7 +398,7 @@ int main(int argc, char **argv)
         puts("FATAL ERROR: WordWrap requires a line length argument and at least one filename target.");
         return EXIT_FAILURE;
     }
-    int recursiveMode;
+    int recursiveMode;    //condition variable to keep track of mode to run the program in
     
     if(strstr(argv[1], "-r") == argv[1]){
         recursiveMode = 1;
@@ -423,19 +406,22 @@ int main(int argc, char **argv)
         recursiveMode = 0;
     }
 
+    //checks to make sure lineLength argument is in the right place and a number
     int i, argLeng;
-
     argLeng = strlen(argv[(recursiveMode) ? 2 : 1]);
-
     for (i = 0; i < argLeng; i++){
         if (!isdigit(argv[(recursiveMode) ? 2 : 1][i]))
         {
-            puts("FATAL ERROR: Given lineLength arg is not a number.\n");
+            printf("FATAL ERROR: Line length parameter | %s | is not a positive integer.\n", argv[(recursiveMode) ? 2 : 1]);
             return EXIT_FAILURE;
         }
     }
 
     int lineLength = atoi(argv[(recursiveMode) ? 2 : 1]);
+    if(lineLength <= 0){
+        printf("FATAL ERROR: Line length parameter | %s | is not a positive integer.\n", argv[(recursiveMode) ? 2 : 1]);
+        return EXIT_FAILURE;
+    }
 
     exitFlag = (struct flag *)malloc(sizeof(struct flag));
     exitFlag->status = EXIT_SUCCESS;
@@ -476,14 +462,17 @@ int main(int argc, char **argv)
         free(newFileName);
     }
 
-    if(dirQueue->start == NULL)            //if no dirs were given as args, we can pre-emptively close dirQueue
-        queue_close(dirQueue);              //recursive mode will simply clear the fileQueue
-
     /*
-    * checking to see if arguments were passed in before accessing
-    * returns exit failure if incorrect arguments were passed in 
+        if no dirs were given as args, we can preemptively close dirQueue
+        if not in recursive mode, we expect nothing else to be enqueued so dirQueue can also be closed
+        
+        if in recursive mode, it will simply clear the fileQueue and no dirQueue work is done
     */
-    if(recursiveMode){   //Check if there is a thread argument -r --> RECURSIVE CASE
+    if(dirQueue->start == NULL || !recursiveMode)
+        queue_close(dirQueue);                     
+
+
+    if(recursiveMode){                          //---RECURSIVE CASE---
         int numOfWrappingThreads;
         int numOfDirectoryThreads;
 
@@ -568,10 +557,7 @@ int main(int argc, char **argv)
         free(exitFlag);
 
         return exitStatus;
-    } else {                                                //NONRECURSIVE CASE
-        
-        if(!dirQueue->closed)               //dirQueue will not be added to any further in the nonrecursive case; it can be closed right away if it is open still
-            queue_close(dirQueue);            
+    } else {                                                //---NONRECURSIVE CASE---          
         struct pathName *dequeuedFile;
         
         while(dequeuedFile = dequeue(fileQueue)){             //dequeue all files given as arguments first, to output to STDOUT
