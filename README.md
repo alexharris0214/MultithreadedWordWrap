@@ -91,4 +91,4 @@ Beyond trying different line length arguments, the test plan also involves a var
 # Test Plan for Recursive Directory Traversal Mode
 For recursive directory traversal method, we can safely make the assumption that normalize is working as intended with the above test cases working as intended. These test cases will test the edge cases working with multiple threads and different directory stuctures.
 
-#Test Plan for Extra Credit ###
+# Test Plan for Extra Credit
