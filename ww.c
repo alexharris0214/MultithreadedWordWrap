@@ -394,16 +394,17 @@ void *dirWorker(void * arg){
 
 int main(int argc, char **argv)
 {
-    if(argc < 3){
-        puts("FATAL ERROR: WordWrap requires a line length argument and at least one filename target.");
-        return EXIT_FAILURE;
-    }
     int recursiveMode;    //condition variable to keep track of mode to run the program in
     
     if(strstr(argv[1], "-r") == argv[1]){
         recursiveMode = 1;
     } else {
         recursiveMode = 0;
+    }
+
+    if(argc < ((recursiveMode) ? 4 : 3)){
+        puts("FATAL ERROR: WordWrap requires a line length argument and at least one filename target.");
+        return EXIT_FAILURE;
     }
 
     //checks to make sure lineLength argument is in the right place and a number
