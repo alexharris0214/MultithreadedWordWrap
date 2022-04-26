@@ -10,8 +10,6 @@
 #include <pthread.h>
 
 #define BUFFER_SIZE 16
-
-int activeDThreads = 0;
 struct pathName {
     char *prefix;
     char *fileName;
@@ -21,7 +19,6 @@ struct node {
     struct pathName *path;
     struct node *next;
 };
-
 struct queue {
     struct node *start;
     struct node *end;
@@ -29,6 +26,11 @@ struct queue {
     pthread_cond_t dequeue_ready;
     int closed;
 } *fileQueue, *dirQueue;
+
+struct flag {
+    pthread_mutex_t lock;
+    int status;
+} *exitFlag, *activeDThreads;
 
 void queue_close(struct queue *queue){
     pthread_mutex_lock(&queue->lock);
@@ -219,6 +221,7 @@ void enqueue(struct queue *queue, struct pathName *file){
         // checking to see if malloc returned correctly
         if(new == NULL){
             puts("Failed to malloc new node for enqueue");
+            pthread_mutex_unlock(&queue->lock);
             return;
         }
         // allocating new node accordingly
@@ -277,7 +280,7 @@ struct pathName *dequeue(struct queue *queue){
 }
 
 void *fileWorker(void * arg){
-    int lineLength = (int)atoi(arg);
+    int lineLength = (int)arg;
     while(!dirQueue->closed || fileQueue->start != NULL){
         //printf("dequeueing in %d\n", pthread_self());
         struct pathName *dequeuedFile = dequeue(fileQueue);
@@ -295,43 +298,69 @@ void *fileWorker(void * arg){
         //printf("FileQueue->start = %s\n", getInputName(fileQueue->start->path));
 
         int inFD = open(inFile, O_RDONLY);
-        int outFD = open(outFile, O_WRONLY|O_CREAT|O_TRUNC, 0700);
-
         free(inFile);
+
+        if(inFD <= 0){ // checking to see if file is opened successfully
+            puts("ERROR: Could not open a file for reading.");
+            pthread_mutex_lock(&exitFlag->lock);
+            exitFlag->status = EXIT_FAILURE;
+            pthread_mutex_unlock(&exitFlag->lock);
+            free(outFile);
+            continue;
+        }
+
+        int outFD = open(outFile, O_WRONLY|O_CREAT|O_TRUNC, 0700);
         free(outFile);
 
-        if(inFD <= 0 || outFD <= 0){ // checking to see if file is opened successfully
-        puts("ERROR: Could not open a file.");
-            return EXIT_FAILURE;            //FIXME: make this change the global exit status using mutex
+        if(outFD <= 0){ // checking to see if file is opened successfully
+            puts("ERROR: Could not open a file for writing to.");
+            pthread_mutex_lock(&exitFlag->lock);
+            exitFlag->status = EXIT_FAILURE;
+            pthread_mutex_unlock(&exitFlag->lock);
+            continue;
         }
 
         // reformatting file
-        normalize(inFD, lineLength, outFD); //FIXME: make global exit status with mutex to keep track of normalize() exit status
+        if(normalize(inFD, lineLength, outFD) == EXIT_FAILURE){
+            pthread_mutex_lock(&exitFlag->lock);
+            exitFlag->status = EXIT_FAILURE;
+            pthread_mutex_unlock(&exitFlag->lock);
+        }
+
         close(inFD);
         close(outFD);
     }
     printf("FileThread %d exiting. Clock: %d\n", pthread_self(), clock());
-    return;
+    return NULL;
 }
 
 void *dirWorker(void * arg){
     struct pathName *dequeuedFile;
     while(dequeuedFile = dequeue(dirQueue)){
-        pthread_mutex_lock(&dirQueue->lock);
-        activeDThreads++;
-        pthread_mutex_unlock(&dirQueue->lock);
+        pthread_mutex_lock(&activeDThreads->lock);            
+        activeDThreads->status++;
+        pthread_mutex_unlock(&activeDThreads->lock);
 
         struct dirent *dp;
         struct stat statbuf; // Holds file information to determine its type
-
-        // ADD MUTEX FOR ACTIVE THREADS AND EXIT STATUS?
 
         char *currDir = getInputName(dequeuedFile);
         free(dequeuedFile->fileName);
         free(dequeuedFile->prefix);
         free(dequeuedFile);
 
-        DIR *dr = opendir(currDir); //FIXME: check if dir opened successfully and update exitFlag
+        DIR *dr = opendir(currDir); 
+        if(dr == NULL){
+            puts("ERROR: Could not open a directory.");
+            pthread_mutex_lock(&exitFlag->lock);
+            exitFlag->status = EXIT_FAILURE;
+            pthread_mutex_unlock(&exitFlag->lock);
+            free(currDir);
+            pthread_mutex_lock(&activeDThreads->lock);            
+            activeDThreads->status--;
+            pthread_mutex_unlock(&activeDThreads->lock);
+            continue;
+        }
 
         // iterating through current directory    
         struct pathName *newPath;
@@ -363,15 +392,17 @@ void *dirWorker(void * arg){
         closedir(dr);
         free(currDir);
 
-        pthread_mutex_lock(&dirQueue->lock);
-        activeDThreads--;
-        //printf("Thread %d decremented # active dir threads. Active count: %d\n", pthread_self(), activeDThreads);
-        if(!activeDThreads && dirQueue->start == NULL){
-            printf("Thread %d closing dir queue. Clock: %d \n", pthread_self(), clock());
+        pthread_mutex_lock(&activeDThreads->lock);     //NOTE: locking two mutexes here is required, but this is the only place activeDthreads is locked at the same time as dirQueue, so it is safe
+        pthread_mutex_lock(&dirQueue->lock);         
+        activeDThreads->status--;
+        if(!activeDThreads->status && dirQueue->start == NULL){
+            //printf("Thread %d closing dir queue. Clock: %d \n", pthread_self(), clock());
             pthread_mutex_unlock(&dirQueue->lock);
+            pthread_mutex_unlock(&activeDThreads->lock);
             queue_close(dirQueue);
         } else {
             pthread_mutex_unlock(&dirQueue->lock);
+            pthread_mutex_unlock(&activeDThreads->lock);
         }
    }
    printf("DirThread %d exiting. Clock: %d\n", pthread_self(), clock());
@@ -380,63 +411,90 @@ void *dirWorker(void * arg){
 
 int main(int argc, char **argv)
 {
-    //int fd = -1; // File pointer
-    //DIR *dr = NULL; // Directory pointer
-    //struct stat statbuf; // Holds file information to determine its type
-    //struct dirent *dp;  // Temp variable to hold individual temp entries
-    //int err; // Variable to store error information
-    //int exitFlag = EXIT_SUCCESS; //determine what exit status we return
+    if(argc < 3){
+        puts("FATAL ERROR: WordWrap requires a line length argument and at least one filename target.");
+        return EXIT_FAILURE;
+    }
+    int recursiveMode;
+    
+    if(strstr(argv[1], "-r") == argv[1]){
+        recursiveMode = 1;
+    } else {
+        recursiveMode = 0;
+    }
 
-    int numOfWrappingThreads;
-    int numOfDirectoryThreads;
-         
-    /*dirQueue = (struct queue *)malloc(sizeof(struct queue));
-    fileQueue = (struct queue *)malloc(sizeof(struct queue));
+    int i, argLeng;
+
+    argLeng = strlen(argv[(recursiveMode) ? 2 : 1]);
+
+    for (i = 0; i < argLeng; i++){
+        if (!isdigit(argv[(recursiveMode) ? 2 : 1][i]))
+        {
+            puts("FATAL ERROR: Given lineLength arg is not a number.\n");
+            return EXIT_FAILURE;
+        }
+    }
+
+    int lineLength = atoi(argv[(recursiveMode) ? 2 : 1]);
+
+    exitFlag = (struct flag *)malloc(sizeof(struct flag));
+    exitFlag->status = EXIT_SUCCESS;
+    pthread_mutex_init(&exitFlag->lock, NULL);
+    
+    dirQueue = (struct queue *)malloc(sizeof(struct queue));
+    fileQueue = (struct queue *)malloc(sizeof(struct queue));          
     init_queue(dirQueue);
     init_queue(fileQueue);
-    struct pathName *path = (struct pathName *)malloc(sizeof(struct pathName));
-    //FIXME: make the third argument work for any directory, even if it has a prefix
-    path->prefix = (char *)malloc(1);
-    path->fileName = (char *)malloc(strlen(argv[3]) + 1); 
-    memset(path->prefix, '\0', 1);
-    memcpy(path->fileName, argv[3], strlen(argv[3]));
-    memset(path->fileName + strlen(argv[3]), '\0', 1);
-    enqueue(dirQueue, path);
-    pthread_t wrapperThreads[numOfWrappingThreads];
-    pthread_t directoryThreads[numOfDirectoryThreads];
-    struct workerArguments *args = malloc(sizeof(struct workerArguments));
-    args->lineLength = atoi(argv[2]);
-    pthread_create(&directoryThreads[0], NULL, dirWorker, args);
-    pthread_create(&directoryThreads[1], NULL, dirWorker, args);
-    pthread_create(&wrapperThreads[0], NULL, fileWorker, args);
-    pthread_create(&wrapperThreads[1], NULL, fileWorker, args);
-    pthread_create(&wrapperThreads[2], NULL, fileWorker, args);
-    pthread_join(directoryThreads[0], NULL);
-    pthread_join(directoryThreads[1], NULL);
-    pthread_join(wrapperThreads[0], NULL);
-    pthread_join(wrapperThreads[1], NULL);
-    pthread_join(wrapperThreads[2], NULL);
+
+    struct pathName *newPath;
+    struct stat statbuf;
+
+    /*
+        ENQUEUEING ALL GIVEN FILE ARGS
+    */
+    for(i = (recursiveMode) ? 3 : 2; i < (argc); i++){ //skip first 3 args if recursive, first 2 args if non-recursive
+        if(strstr(argv[i], ".") == argv[i] || strstr(argv[i], "wrap.") == argv[i]){
+            puts("WARNING: A file argument given has a restricted prefix \".\" or \"wrap.\" ; it will be ignored.");
+            continue;
+        }
+        newPath = (struct pathName *)malloc(sizeof(struct pathName));
+
+        // checking to see if a file or directory was read
+        newPath->prefix = (char *)malloc(1);
+        newPath->fileName = (char *)malloc(strlen(argv[i]) + 1);
+        memset(newPath->prefix, '\0', 1);
+        memcpy(newPath->fileName, argv[i], strlen(argv[i]) + 1);
+        
+        char *newFileName = getInputName(newPath);
+        stat(newFileName, &statbuf);
     
-    pthread_cond_destroy(&fileQueue->dequeue_ready);
-    pthread_cond_destroy(&dirQueue->dequeue_ready);
-    pthread_mutex_destroy(&fileQueue->lock);
-    pthread_mutex_destroy(&dirQueue->lock);
-    free(dirQueue);
-    free(fileQueue);
-    free(args);/*
+        if(S_ISDIR(statbuf.st_mode)){
+            enqueue(dirQueue, newPath);
+        } else {
+            enqueue(fileQueue, newPath);
+        }
+        free(newFileName);
+    }
+
+    if(dirQueue->start == NULL)            //if no dirs were given as args, we can pre-emptively close dirQueue
+        queue_close(dirQueue);              //recursive mode will simply clear the fileQueue
+
     /*
     * checking to see if arguments were passed in before accessing
-    * returns exit failure if no arguments were passed in 
+    * returns exit failure if incorrect arguments were passed in 
     */
-    if(argc==4){
-        if(!strcmp(argv[1], "-r")){ 
+    if(recursiveMode){   //Check if there is a thread argument -r --> RECURSIVE CASE
+        int numOfWrappingThreads;
+        int numOfDirectoryThreads;
+
+        activeDThreads = (struct flag *)malloc(sizeof(struct flag));      //recursive mode requires keeping track of active directory threads, we need to init
+        activeDThreads->status = 0;
+        pthread_mutex_init(&activeDThreads->lock, NULL);
+
+        if(!strcmp(argv[1], "-r")){    //recursive argument is JUST "-r"  --> 1 wrapper, 1 dir thread
             numOfWrappingThreads = 1;
             numOfDirectoryThreads = 1;
         } else { 
-            if(strstr(argv[1], "-r") != argv[1]){   //Check if thread argument does not start with -r
-                puts("Invalid argument for thread mode.");
-                return EXIT_FAILURE;
-            }
             //at this point, thread argument must have started with -r but is not just "-r"
             
             int numsLen = strlen((char *)&argv[1][2]);
@@ -453,7 +511,7 @@ int main(int argc, char **argv)
                 
                 free(argStr);
                 if(numOfWrappingThreads <= 0){
-                    puts("Thread mode argument requires at least one non-negative, non-zero integer.");
+                    puts("FATAL ERROR: Thread mode argument requires at least one non-negative, non-zero integer.");
                     return EXIT_FAILURE;
                 }
             } else {   //if it does contain a comma, must have exactly two numbers
@@ -463,7 +521,7 @@ int main(int argc, char **argv)
                 token = strtok(NULL, ","); //strtok() returns null if cannot be split
                 
                 if(token == NULL){ 
-                    puts("Thread mode argument must have one integer or two integers separated by a comma.");
+                    puts("FATAL ERROR: Thread mode argument must have one integer or two integers separated by a comma.");
                     return EXIT_FAILURE;
                 }
 
@@ -474,7 +532,7 @@ int main(int argc, char **argv)
 
                 free(argStr);
                 if(numOfDirectoryThreads <= 0 || numOfWrappingThreads <= 0){      //if num <= 0, then the thread arg number is too small or it was not a number
-                    puts("Thread mode argument requires non-negative, non-zero integers.");
+                    puts("FATAL ERROR: Thread mode argument requires non-negative, non-zero integers.");
                     return EXIT_FAILURE;
                 }
             }
@@ -483,26 +541,11 @@ int main(int argc, char **argv)
         pthread_t wrapperThreads[numOfWrappingThreads];
         pthread_t dirThreads[numOfDirectoryThreads];
 
-        dirQueue = (struct queue *)malloc(sizeof(struct queue));
-        fileQueue = (struct queue *)malloc(sizeof(struct queue));          
-        init_queue(dirQueue);
-        init_queue(fileQueue);
-
-        struct pathName *path = (struct pathName *)malloc(sizeof(struct pathName));
-
-        path->prefix = (char *)malloc(1);
-        path->fileName = (char *)malloc(strlen(argv[3]) + 1); 
-        memset(path->prefix, '\0', 1);
-        memcpy(path->fileName, argv[3], strlen(argv[3]));
-        memset(path->fileName + strlen(argv[3]), '\0', 1);                    //FIXME: make a FREEME struct to free all dynamically allocated variables at the end so this doesn't happen
-
-        enqueue(dirQueue, path);
-
         for(int i = 0; i<numOfDirectoryThreads; i++){
             pthread_create(&dirThreads[i], NULL, dirWorker, NULL);
         }
         for(int i = 0; i<numOfWrappingThreads; i++){
-            pthread_create(&wrapperThreads[i], NULL, fileWorker, argv[2]);
+            pthread_create(&wrapperThreads[i], NULL, fileWorker, lineLength);
         }
         for(int i = 0; i<numOfDirectoryThreads; i++){
             pthread_join(dirThreads[i], NULL);
@@ -515,92 +558,125 @@ int main(int argc, char **argv)
         pthread_cond_destroy(&dirQueue->dequeue_ready);
         pthread_mutex_destroy(&fileQueue->lock);
         pthread_mutex_destroy(&dirQueue->lock);
+        pthread_mutex_destroy(&activeDThreads->lock);
         free(dirQueue);
         free(fileQueue);
-//    } else {
-//         if(argc>1){
-//             for(int i = 0; i < strlen(argv[1]); i++){ //check if length argument is a number
-//                 if(!isdigit(argv[1][i])){               // checking each digit individually
-//                     puts("ERROR: Invalid lineLength argument; must be an integer.");
-//                     return EXIT_FAILURE;
-//                 }
-//             }
-//         } else {
-//             puts("ERROR: Not enough arguments given.");
-//             return EXIT_FAILURE;
-//         }
+        free(activeDThreads);
 
-//         int length = atoi(argv[1]);
+        int exitStatus = exitFlag->status;
 
-//         /*
-//         * Checks to see if valid arguments are passed in
-//         * if it was, check to see if file argument is a directory or normal file
-//         * if not, exit with failure
-//         */
-//         if(argc == 3){
-//             err = stat(argv[2], &statbuf);
-//             // Checking to see if fstat returned a valid stat struct
-//             if(err){
-//                 perror(argv[2]); //printing out what went wrong when accessing the file
-//                 return EXIT_FAILURE;
-//             }
+        free(exitFlag);
 
-//             // file argument is a directory
-//             if(S_ISDIR(statbuf.st_mode)){
-//                 dr = opendir(argv[2]);
-//                 if(dr <= 0 ){ // error checking to see if directory was opened
-//                     puts("ERROR: Could not open directory.\n");
-//                 }
-//                 chdir(argv[2]); // Changing the working directory to have access to the files we need
+        return exitStatus;
+    } else {                                                //NONRECURSIVE CASE
+        
+        if(!dirQueue->closed)               //dirQueue will not be added to any further in the nonrecursive case; it can be closed right away if it is open still
+            queue_close(dirQueue);            
+        struct pathName *dequeuedFile;
+        
+        while(dequeuedFile = dequeue(fileQueue)){             //dequeue all files given as arguments first, to output to STDOUT
+            char *inFile = getInputName(dequeuedFile);
+            free(dequeuedFile->fileName);
+            free(dequeuedFile->prefix);
+            free(dequeuedFile);
 
-//                 int outputFD;
-//                 while ((dp = readdir(dr)) != NULL){ // while there are files to be read
+            int inFD = open(inFile, O_RDONLY);
 
-//                     //ignoring files which start with "." or "wrap."
-//                     if(strstr(dp->d_name, ".") == dp->d_name || strstr(dp->d_name, "wrap.") == dp->d_name){
-//                         continue;
-//                     }
+            free(inFile);
+
+            if(inFD <= 0){ // checking to see if file is opened successfully
+                exitFlag->status = EXIT_FAILURE;
+                continue;            
+            }
+
+            // reformatting file
+            normalize(inFD, lineLength, STDOUT_FILENO); //FIXME: make global exit status with mutex to keep track of normalize() exit status
+            close(inFD);
+        }
+
+        while(dequeuedFile = dequeue(dirQueue)){
+            struct dirent *dp;
+            struct stat statbuf; // Holds file information to determine its type
+
+            char *currDir = getInputName(dequeuedFile);
+            free(dequeuedFile->fileName);
+            free(dequeuedFile->prefix);
+            free(dequeuedFile);
+
+            DIR *dr = opendir(currDir); //FIXME: check if dir opened successfully and update exitFlag
+            if(dr == NULL){
+                puts("ERROR: Could not open a directory.");
+                exitFlag->status = EXIT_FAILURE;
+                continue; 
+            }
+
+            // iterating through current directory    
+            struct pathName *newPath;
+            while((dp = readdir(dr)) != NULL){
+                if(strstr(dp->d_name, ".") == dp->d_name || strstr(dp->d_name, "wrap.") == dp->d_name){
+                    continue;
+                }
+                newPath = (struct pathName *)malloc(sizeof(struct pathName));
+
+                // checking to see if a file or directory was read
+                newPath->prefix = (char *)malloc(sizeof(char)*(strlen(currDir) + 1));
+                newPath->fileName = (char *)malloc(sizeof(char)*(strlen(dp->d_name) + 1));
+                memcpy(newPath->fileName, dp->d_name, strlen(dp->d_name) + 1);
+                memcpy(newPath->prefix, currDir, strlen(currDir) + 1);
+                char *newFileName = getInputName(newPath);
+
+                stat(newFileName, &statbuf);
             
-//                     // open the current file that we are on and work on it
-//                     fd = open(dp->d_name, O_RDONLY);
-//                     if(fd > 0 && dp->d_name){ // checking to see if file opened successfully
-//                         char *outputFilename = getOutputName(dp->d_name);
-//                         outputFD = open(outputFilename, O_WRONLY|O_CREAT|O_TRUNC, 0700);    // creating file if it does not exist with user RWX permissions
-//                         free(outputFilename);                                        
-//                         if(outputFD <= 0){                                                  // checking to see if open returned successfully 
-//                             puts("ERROR: Could not open/create desired output file.\n");
-//                             perror("outputFD");
-//                             return EXIT_FAILURE;
-//                         }
-//                         if(normalize(fd, length, outputFD) == EXIT_FAILURE)     //save exit status to return later, as the program still needs to process the rest of the directory
-//                             exitFlag = EXIT_FAILURE;
-//                         close(outputFD);
-//                     }
-//                     // close file when we are done
-//                     close(fd);
-//                 }
-//                 // freeing directory object
-//                 free(dr);
-//             } else if(S_ISREG(statbuf.st_mode)){ // file argument is a regular file
-//                 fd = open(argv[2], O_RDONLY);
-//                 if(fd <= 0){ // checking to see if file is opened successfully
-//                     puts("ERROR: Could not open file.\n");
-//                     return EXIT_FAILURE;
-//                 }
-//                 // reformatting file and assigning the result to return flag
-//                 exitFlag = normalize(fd, length, 1);
-//                 close(fd);
-//             } else {
-//                 puts("ERROR: Invalid file type passed as argument.\n");
-//                     return EXIT_FAILURE;
-//             }
-//         } else if(argc==2){     // no file was passed in; reading from standard input
-//             normalize(0, length, 1);
-//             return EXIT_FAILURE;
-//         } else {                // fall through case when not enough arguments are passed
-//             puts("ERROR: Not enough arguments.\n");
-//             return EXIT_FAILURE;
-//         }
-//         return exitFlag;
-   }
+                if(!S_ISDIR(statbuf.st_mode)){     //NON-RECURSIVE --> ONLY ENQUEUE FILES, NOT DIRS
+                    enqueue(fileQueue, newPath);
+                } else {
+                    free(newPath->prefix);
+                    free(newPath->fileName);
+                    free(newPath);
+                }
+                free(newFileName);
+            }
+            closedir(dr);
+            free(currDir);
+        }
+
+        while(dequeuedFile = dequeue(fileQueue)){              //dequeue all files that were within directories
+            char *inFile = getInputName(dequeuedFile);
+            char *outFile = getOutputName(dequeuedFile);
+            free(dequeuedFile->fileName);
+            free(dequeuedFile->prefix);
+            free(dequeuedFile);
+
+            int inFD = open(inFile, O_RDONLY);
+            int outFD = open(outFile, O_WRONLY|O_CREAT|O_TRUNC, 0700);
+
+            free(inFile);
+            free(outFile);
+
+            if(inFD <= 0 || outFD <= 0){ // checking to see if file is opened successfully
+                puts("ERROR: Could not open a file.");
+                exitFlag->status = EXIT_FAILURE;
+                continue;            
+            }
+
+            // reformatting file
+            normalize(inFD, lineLength, outFD); //FIXME: make global exit status with mutex to keep track of normalize() exit status
+            close(inFD);
+            close(outFD);
+        }
+
+        pthread_cond_destroy(&fileQueue->dequeue_ready);
+        pthread_cond_destroy(&dirQueue->dequeue_ready);
+        pthread_mutex_destroy(&fileQueue->lock);
+        pthread_mutex_destroy(&dirQueue->lock);
+        pthread_mutex_destroy(&exitFlag->lock);
+        free(dirQueue);
+        free(fileQueue);
+
+        int exitStatus = exitFlag->status;
+
+        free(exitFlag);
+
+        return exitStatus; 
+    }
 }
