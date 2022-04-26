@@ -88,7 +88,7 @@ Beyond trying different line length arguments, the test plan also involves a var
 - Finally, To verify an edge case where an already-formatted file is passed to the program, we used file to STDOUT I/O with example2.txt as input and STDOUT piped to a file named output1.txt. The program is then run one more time with output1.txt as input and STDOUT piped to a file named output2.txt. The program "cmp" is then run with output1.txt and output2.txt as parameters to ensure that these files are exactly the same. 
 
 
-### Test Plan for Recursive Directory Traversal Mode ###
+# Test Plan for Recursive Directory Traversal Mode
 For recursive directory traversal method, we can safely make the assumption that normalize is working as intended with the above test cases working as intended. These test cases will test the edge cases working with multiple threads and different directory stuctures.
 
-### Test Plan for Extra Credit ###
+#Test Plan for Extra Credit ###
