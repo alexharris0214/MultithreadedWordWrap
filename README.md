@@ -62,12 +62,28 @@
   - In the situation where we have a newline character, we will note that we have seen a new line character, and if the next character in the buffer/future buffer is also a new line, we recognize this as a paragraph scenario with the tracker newPG. Otherwise, we will ignore this new line character
    - When there is another word to be written to output, newPG will signify to start a new paragraph before writing this new word.
 
-### Test Plan ###
+# Test Plan 
 
-# PA3 Requirements
+### PA3 Requirements ###
+1) Correctly wrap files as specified in PA2
+2) When traversing files to wrap, ignore those that start with ".", "..", or "wrap."
+3) Recursive directory traversal: When given the "-r" argument, ww will wrap the files in the given directory and all subdirectories
+4) Multi-threaded wrapping: When given the argument "-rN", ww will use N threads for wrapping all files in given directory and all subdirectories
+- N must be a positive integer
+5) Multi-threaded directory traversal: When given the argument "-rM,N", ww will use N threads for wrapping files and M threads to read through the given directory and its subdirectories.
+- M must be a positive integer
+6) All directory threads terminate at the same time; once the queue is empty and no directory thread is actively traversing a directory, the queue must "close" and the directory threads exit
+- The program must keep track of the number of active directory-traversing threads so that the directory queue can be closed when they are finished
+- The program must have a way to detect whether the queue is empty so that directory threads can wait for more directories to traverse or exit when the queue is closed
+8) Must maintain synchronized, dynamic queues accessible to multiple threads for storing files to wrap and directories to be traversed.
+- Requires properly functioning mutual exclusion and synchronization
+9) ww must not exit with any warnings from AddressSanitizer or LeakSanitizer
+10) The program must maintain a global value to track whether any thread encounters an error condition so that ww can return the correct exit code
+11) The program should use a smart, dynamically allocated method of keeping track of path names. 
+- When allocating pathnames, we know their length as strings and therefore do not need to use the inefficient strcat() in favor of memcpy(). 
 
 
-# Test Plan for Non-Recursive mode
+# Test Plan for Non-Recursive mode - wrapping all files correctly as in PA2 (1)
 Overall, the test plan first involves three major I/O cases: STDIN to STDOUT, file to STDOUT, and directory to files
   - We run the program in all three of these cases (for the first, simply piping example1.txt or example2.txt to STDIN and comparing to the second case) to ensure our file I/O is working properly
 
