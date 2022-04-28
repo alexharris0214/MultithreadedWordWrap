@@ -274,6 +274,7 @@ struct pathName *dequeue(struct queue *queue){
 }
 
 void *fileWorker(void * arg){
+    //printf("FileThread %d starting. Clock: %d\n", pthread_self(), clock());
     int lineLength = (int)arg;
     struct pathName *dequeuedFile;
     while(dequeuedFile = dequeue(fileQueue)){
@@ -317,11 +318,12 @@ void *fileWorker(void * arg){
         close(inFD);
         close(outFD);
     }
-    printf("FileThread %d exiting. Clock: %d\n", pthread_self(), clock());
+    //printf("FileThread %d exiting. Clock: %d\n", pthread_self(), clock());
     return NULL;
 }
 
 void *dirWorker(void * arg){
+    //printf("DirThread %d starting. Clock: %d\n", pthread_self(), clock());
     struct pathName *dequeuedFile;
     while(dequeuedFile = dequeue(dirQueue)){
         pthread_mutex_lock(&activeDThreads->lock);            
@@ -388,7 +390,7 @@ void *dirWorker(void * arg){
             pthread_mutex_unlock(&activeDThreads->lock);
         }
    }
-   printf("DirThread %d exiting. Clock: %d\n", pthread_self(), clock());
+   //printf("DirThread %d exiting. Clock: %d\n", pthread_self(), clock());
    return NULL;
 }
 
@@ -402,8 +404,11 @@ int main(int argc, char **argv)
         recursiveMode = 0;
     }
 
-    if(argc < ((recursiveMode) ? 4 : 3)){
-        puts("FATAL ERROR: WordWrap requires a line length argument and at least one filename target.");
+    if(recursiveMode && argc < 4){
+        puts("FATAL ERROR: Recursive WordWrap requires a line length argument and at least one filename target.");
+        return EXIT_FAILURE;
+    } else if(!recursiveMode && argc < 2){
+        puts("FATAL ERROR: Non-recursive WordWrap requires at least a line length argument.");
         return EXIT_FAILURE;
     }
 
@@ -423,6 +428,9 @@ int main(int argc, char **argv)
         printf("FATAL ERROR: Line length parameter | %s | is not a positive integer.\n", argv[(recursiveMode) ? 2 : 1]);
         return EXIT_FAILURE;
     }
+
+    if(!recursiveMode && argc == 2)      //STDIN case. Must be non-recursive.
+        return normalize(0, lineLength, 1);
 
     exitFlag = (struct flag *)malloc(sizeof(struct flag));
     exitFlag->status = EXIT_SUCCESS;
