@@ -98,3 +98,5 @@ For the recursive directory traversal method, we can safely make the assumption 
 - A directory structure where we have multiple nested sub-directories to ensure subdirectories are still registering further directory files and picking up other directory files from the directory queue.
 
 # Test Plan for Extra Credit
+Aside from the test cases described in non-rerusive traversal mode, there a few more edge cases to cover, since we can extend our program to work with recursive mode, but extending to describe which specific directories/files to cover.
+- Case were we specify recursvie mode but provide a file, 
