@@ -66,24 +66,26 @@
 
 ### PA3 Requirements ###
 1) Correctly wrap files as specified in PA2
-2) When traversing files to wrap, ignore those that start with ".", "..", or "wrap."
-3) Recursive directory traversal: When given the "-r" argument, ww will wrap the files in the given directory and all subdirectories
-4) Multi-threaded wrapping: When given the argument "-rN", ww will use N threads for wrapping all files in given directory and all subdirectories
+2) Recursive directory traversal: When given the "-r" argument, ww will wrap the files in the given directory and all subdirectories
+3) Multi-threaded wrapping: When given the argument "-rN", ww will use N threads for wrapping all files in given directory and all subdirectories
 - N must be a positive integer
-5) Multi-threaded directory traversal: When given the argument "-rM,N", ww will use N threads for wrapping files and M threads to read through the given directory and its subdirectories.
+4) Multi-threaded directory traversal: When given the argument "-rM,N", ww will use N threads for wrapping files and M threads to read through the given directory and its subdirectories.
 - M must be a positive integer
-6) All directory threads terminate at the same time; once the queue is empty and no directory thread is actively traversing a directory, the queue must "close" and the directory threads exit
+5) All directory threads terminate at the same time; once the queue is empty and no directory thread is actively traversing a directory, the queue must "close" and the directory threads exit
 - The program must keep track of the number of active directory-traversing threads so that the directory queue can be closed when they are finished
 - The program must have a way to detect whether the queue is empty so that directory threads can wait for more directories to traverse or exit when the queue is closed
-8) Must maintain synchronized, dynamic queues accessible to multiple threads for storing files to wrap and directories to be traversed.
+6) Must maintain synchronized, dynamic queues accessible to multiple threads for storing files to wrap and directories to be traversed.
 - Requires properly functioning mutual exclusion and synchronization
-9) ww must not exit with any warnings from AddressSanitizer or LeakSanitizer
-10) The program must maintain a global value to track whether any thread encounters an error condition so that ww can return the correct exit code
-11) The program should use a smart, dynamically allocated method of keeping track of path names. 
+- The program should not be able to enter deadlock
+7) ww must not exit with any warnings from AddressSanitizer or LeakSanitizer
+8) The program must maintain a global value to track whether any thread encounters an error condition so that ww can return the correct exit code
+9) The program should use a smart, dynamically allocated method of keeping track of path names. 
 - When allocating pathnames, we know their length as strings and therefore do not need to use the inefficient strcat() in favor of memcpy(). 
+10) EXTRA CREDIT: The user should be able to give multiple files and directories in either non-recursive or recursive mode which should be processed correctly respective to the mode chosen
+- Files given directly as arguments should output to STDOUT
 
 
-# Test Plan for Non-Recursive mode - wrapping all files correctly as in PA2 (1)
+### Test Plan for Wrapping all files correctly as in PA2, non-recursive mode (1) ###
 Overall, the test plan first involves three major I/O cases: STDIN to STDOUT, file to STDOUT, and directory to files
   - We run the program in all three of these cases (for the first, simply piping example1.txt or example2.txt to STDIN and comparing to the second case) to ensure our file I/O is working properly
 
@@ -110,15 +112,29 @@ Beyond trying different line length arguments, the test plan also involves a var
 - Finally, To verify an edge case where an already-formatted file is passed to the program, we used file to STDOUT I/O with example2.txt as input and STDOUT piped to a file named output1.txt. The program is then run one more time with output1.txt as input and STDOUT piped to a file named output2.txt. The program "cmp" is then run with output1.txt and output2.txt as parameters to ensure that these files are exactly the same. 
 
 
-# Test Plan for Recursive Directory Traversal Mode
-For the recursive directory traversal method, we can safely make the assumption that normalize is working as intended with the above test cases working as intended. These test cases will test the edge cases working with multiple threads and different directory structures.
+### Test Plan for Recursive Directory Traversal Mode ###
+For the recursive directory traversal method, we can safely make the assumption that normalize is working as intended with the above test cases working as intended. These test cases will test potentially problematic edge cases working with multiple threads and different directory structures.
 
-- In the first test case, our base case. We have a directory structure with a couple of test files for wrapping within the root directory. This is to assure that the word wrap still works as intended from last project with multi-threading. This is also done to test that the directory queue is closing correctly, despite nothing ever being enqueued by the directory threads.
-- An edge case where we have a directory structure with multiple subdirectories, all having no regular files within them, including the root directory. This is done to assure the file threads are closing properly, even when never being used to wrap files.
-- A directory structure where we have a mix of subdirectories where some are empty and some are full of regular files to ensure directory threads are not getting stuck after finishing a queue with files, and then encountering a scenario where an empty directory is full.
-- A directory structure where we have multiple nested sub-directories to ensure subdirectories are still registering further directory files and picking up other directory files from the directory queue.
+While running these test cases, we use the printf() function in our thread workers to display which threads start and exit when, to ensure we are using a proper amount of threads as the user requests as well as closing them all at the right time. Each of these test cases  (Tests conditions 2, 3, and 4 for thread number)
 
-# Test Plan for Extra Credit
+- To rigorously test conditions 2, 3, 4, and 5, we have a directory structured like below:
+                              
+                              root
+                subdir1               subdir2
+          (some text files)     (some text files)   subdir3      subdir5
+                                                    subdir4
+                                               (some text files)
+                                               
+  This evaluates every possible structure: multiple subdirectories in one, a directory with only files, a directory with files and subdirectories, several nested subdirectories, and an empty subdirectory. We run the program with the "-r", "-rN", and "-rM,N" modes while tracking the opening and closing of threads to ensure the proper amount are used. 
+   In the "-rM,N" case, we test cases where M = N, M is significantly higher than N, and N is significantly higher than M to ensure that either thread type outrunning the other does not cause issues.
+   To test condition #6, we run the program with print statements that display the accessing thread and clock time before and after each attempt to lock and unlock a mutex. This allows us to verify that our mutual exclusion method allows access to shared data to only one thread at a time. Further, we can prove that our program will not enter deadlock because there is only one place where two mutexes are locked at the same time. This way, two threads cannot be waiting to access the two different resources being locked; a thread must have already locked one resource to wait for the other every time.
+   
+ - In the next test case is our "base case" for directory traversal. We have a directory structure with a couple of test files for wrapping within the root directory. This is to assure that the word wrap still works as intended from last project with multi-threading. This is also done to test that the directory queue is closing correctly, despite nothing ever being enqueued by the directory threads.
+- We also test an edge case where we have a directory structure with multiple subdirectories, all having no regular files within them, including the root directory. This is done to assure the file threads are closing properly, even when never being used to wrap files.
+
+- To test condition #9, we give the program a single empty text file among normally populated text files to wrap and run it in recursive mode with multiple file-wrapping threads. normalize() prints an error message and returns EXIT_FAILURE if it runs into an empty text file. This test verifies that global tracking of exit code works as intended, since only one file worker will encounter this .
+
+### Test Plan for Extra Credit ###
 Aside from the test cases described in non-rerusive traversal mode, there a few more edge cases to cover, since we can extend our program to work with recursive mode, but extending to describe which specific directories/files to cover.
 - Case were we specify recursvie mode but provide a file, the file is wrapped using a singular file thread, and the directory thread does nothing besides being created and destroyed.
 - Case were we specify recursive mode but provide a file that is within a specified directory, recursive flag is ignored and file is wrapped using one file thread
