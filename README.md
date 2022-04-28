@@ -6,19 +6,20 @@
 
 # Design
 ### Reading Inputs: ###
-- We first validate the inputs within our main method. The first thing to check is the number of inputs. If we have one additional input, we know to work with standard input. If we have two additional inputs, the next thing to check is whether the third input is either a file or a directory. We use a statbuf struct to perform this check, and then proceed to call our normalize method with the proper inputs. Finally, if we have three aditionall inputs, we know we have an additional flag that indicates recursve directory traversal mode. In this case, we parse the flag to determine the number of threads to use for the recrusive directory traversal.
+- We first validate the inputs within our main method. The first thing to check is the number of inputs. If we have one additional input, we know to work with standard input. If we have two additional inputs, the next thing to check is whether the third input is either a file or a directory. We use a statbuf struct to perform this check, and then proceed to call our normalize method with the proper inputs. Finally, if we have three additional inputs, we know we have an additional flag that indicates recursive directory traversal mode. In this case, we parse the flag to determine the number of threads to use for the recursive directory traversal.
 - (Normalize parameters described later in test plan). 
 - If no additional inputs were passed into our program, we exit with EXIT_FAILURE.
 
 ### Working with Threads ###
-- In our main method, we first initailize the number of threads for the file worker method, which takes care of normalizing the files within a root direcotory and it's sub directories, and the number of threads for the directory worker method, which takes care of traversing the directories and sending files to the fileworker for it to work on.
+- In our main method, we first initialize the number of threads for the file worker method, which takes care of normalizing the files within a root directory and it's subdirectories, and the number of threads for the directory worker method, which takes care of traversing the directories and sending files to the fileworker for it to work on.
 - The way these two workers correlate is with use of a fileQueue.
-- The directory worker contains a directoryQueue, which is locked so only one thread can enqeueu and deqeue at a time.
+- The directory worker contains a directoryQueue, which is locked so only one thread can enqueue and dequeue at a time.
 - Whenever the directory worker encounters a directory file, it enqueue's it onto the directory queue, for another thread to pick it up. If it encounters a regular file, it enqueues it onto the file queue.
-- The file worker will then pick up any files from the fileQueue, one thread at at time, and begin to call the normalize method and place it's output in the correct spot.
-- The fileWorker threads will repeat this process untill the fileQueue is empty AND the directory queue is closed, meaning that there are no more files coming into the queueu.
-- The dirQueue threads will repeat untill the directoryQueue is empty AND there are no active directory threads currently traversing a directory, signaling that there are no more subdirectories/files to be read.
-
+- The file worker will then pick up any files from the fileQueue, one thread at a time, and begin to call the normalize method and place it's output in the correct spot.
+- The fileWorker threads will repeat this process until the fileQueue is empty AND the directory queue is closed, meaning that there are no more files coming into the queue.
+- The dirQueue threads will repeat until the directoryQueue is empty AND there are no active directory threads currently traversing a directory, signaling that there are no more subdirectories/files to be read.
+- The locking mechanism lies within the queue's enqueue and dequeue method. Since there were multiple parts of the directory and file worker that could be worked on asynchronous, it was better to leave the mutual exclusion logic within the enqueue and dequeue methods since they were responsible for accessing and modifying the queues in order to minimize lock and unlock calls.
+- The threads (both file and directory) are created and joined within the main method and do not return any values
 
 
 ### Calling Normalize Method ###
@@ -28,7 +29,7 @@
   - int outputID (the file descriptor of our output file)
 - In the scenario where only the line length is provided to our program, we will make the following call to normalize: "normalize(0, argv[1], 1);". The inputFD parameter is set to 0, as this refers to the file descriptor for standard input as a source. The line length parameter is set to be the second argument in our argv list (argv[1]), since argv[0] contains the name of our program. Finally, outputFD is set to 1, since this is the file descriptor for standard output.
 - In the scenario where there are two arguments given to the program and the second argument is a regular file, we will make the following call to normalize: "normalize(fd, argv[1], 1);". Before calling normalize(), open is called on the input file given in argv[2] and assigned to fd. This scenario still requires writing to standard output, so outputFD is set to 1.
--  In the scenario there are two arguments provided and the second argument is a directory file, we will make the following call to normalize: "normalize(fd, argv[1], outputFD)". This is done serially within a while loop with each file in the directory provided by argv[2]. First, we create a directory pointer and assign it to dr using opendr. Then, while there are more directory entries to be read, use open on each filename if it does not start with "." or "wrap." (if it does, move on to the next filename). The file is then assigned a file descriptor fd using open, and then passed to the normalize function one at a time as above. The outputFD descriptor is assigned to a file with the same filename as the input file but with the prefix "wrap.", using a helper function getOutputName(filename). The new output filename returned from getOutputName is passed to the open function using the O_CREATE flag (for the situation where it has not yet been made) to get the file descriptor passed to outputFD.
+-  In the scenario, there are two arguments provided and the second argument is a directory file, we will make the following call to normalize: "normalize(fd, argv[1], outputFD)". This is done serially within a while loop with each file in the directory provided by argv[2]. First, we create a directory pointer and assign it to dr using opendr. Then, while there are more directory entries to be read, use open on each filename if it does not start with "." or "wrap." (if it does, move on to the next filename). The file is then assigned a file descriptor fd using open, and then passed to the normalize function one at a time as above. The outputFD descriptor is assigned to a file with the same filename as the input file but with the prefix "wrap.", using a helper function getOutputName(filename). The new output filename returned from getOutputName is passed to the open function using the O_CREATE flag (for the situation where it has not yet been made) to get the file descriptor passed to outputFD.
 
 ### Normalize Method ###
 - The general structure of normalize is to:
@@ -89,6 +90,11 @@ Beyond trying different line length arguments, the test plan also involves a var
 
 
 # Test Plan for Recursive Directory Traversal Mode
-For recursive directory traversal method, we can safely make the assumption that normalize is working as intended with the above test cases working as intended. These test cases will test the edge cases working with multiple threads and different directory stuctures.
+For the recursive directory traversal method, we can safely make the assumption that normalize is working as intended with the above test cases working as intended. These test cases will test the edge cases working with multiple threads and different directory structures.
+
+- In the first test case, our base case. We have a directory structure with a couple of test files for wrapping within the root directory. This is to assure that the word wrap still works as intended from last project with multi-threading. This is also done to test that the directory queue is closing correctly, despite nothing ever being enqueued by the directory threads.
+- An edge case where we have a directory structure with multiple subdirectories, all having no regular files within them, including the root directory. This is done to assure the file threads are closing properly, even when never being used to wrap files.
+- A directory structure where we have a mix of subdirectories where some are empty and some are full of regular files to ensure directory threads are not getting stuck after finishing a queue with files, and then encountering a scenario where an empty directory is full.
+- A directory structure where we have multiple nested sub-directories to ensure subdirectories are still registering further directory files and picking up other directory files from the directory queue.
 
 # Test Plan for Extra Credit
