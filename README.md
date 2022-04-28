@@ -99,4 +99,5 @@ For the recursive directory traversal method, we can safely make the assumption 
 
 # Test Plan for Extra Credit
 Aside from the test cases described in non-rerusive traversal mode, there a few more edge cases to cover, since we can extend our program to work with recursive mode, but extending to describe which specific directories/files to cover.
-- Case were we specify recursvie mode but provide a file, 
+- Case were we specify recursvie mode but provide a file, the file is wrapped using a singular file thread, and the directory thread does nothing besides being created and destroyed.
+- Case were we specify recursive mode but provide a file that is within a specified directory, recursive flag is ignored and file is wrapped using one file thread
