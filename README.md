@@ -62,6 +62,11 @@
   - In the situation where we have a newline character, we will note that we have seen a new line character, and if the next character in the buffer/future buffer is also a new line, we recognize this as a paragraph scenario with the tracker newPG. Otherwise, we will ignore this new line character
    - When there is another word to be written to output, newPG will signify to start a new paragraph before writing this new word.
 
+### Test Plan ###
+
+# PA3 Requirements
+
+
 # Test Plan for Non-Recursive mode
 Overall, the test plan first involves three major I/O cases: STDIN to STDOUT, file to STDOUT, and directory to files
   - We run the program in all three of these cases (for the first, simply piping example1.txt or example2.txt to STDIN and comparing to the second case) to ensure our file I/O is working properly
