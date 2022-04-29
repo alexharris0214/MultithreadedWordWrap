@@ -1,6 +1,6 @@
 # MultiThreaded WordWrap
 - CS214
-- Group 39
+- Group 53
 # Authors
 - Maxim Yacun (NETID: my405) and Alexander Harris (NETID: ajh273)
 
@@ -18,8 +18,17 @@
 - The file worker will then pick up any files from the fileQueue, one thread at a time, and begin to call the normalize method and place it's output in the correct spot.
 - The fileWorker threads will repeat this process until the fileQueue is empty AND the directory queue is closed, meaning that there are no more files coming into the queue.
 - The dirQueue threads will repeat until the directoryQueue is empty AND there are no active directory threads currently traversing a directory, signaling that there are no more subdirectories/files to be read.
-- The locking mechanism lies within the queue's enqueue and dequeue method. Since there were multiple parts of the directory and file worker that could be worked on asynchronous, it was better to leave the mutual exclusion logic within the enqueue and dequeue methods since they were responsible for accessing and modifying the queues in order to minimize lock and unlock calls.
+   1. In order to do this, we created a flag struct that keeps track of the number of current threads running. This is done by having an integer variable within that struct, which is incremented and decremented at the beginning and end respectively of the main loop of directory worker.
+   2. This struct is initiated globally to be accessed by all threads.
+   3. Therefore, this struct also contains a mutex lock so that only one thread can modify this value at a given time.
+   4. Any given thread should initialize this variable when enqueuing a directory, and decrement when done reading through the directory it picked up.
+- The locking mechanism for the queue struct lies within the queue's enqueue and dequeue method. Since there were multiple parts of the directory and file worker that could be worked on asynchronous, it was better to leave the mutual exclusion logic within the enqueue and dequeue methods since they were responsible for accessing and modifying the queues in order to minimize lock and unlock calls.
+- The amount of active directory threads is kept track by a global struct of type flag that lives within the directory worker method. 
 - The threads (both file and directory) are created and joined within the main method and do not return any values
+- In order to catch the error flag that can be encountered in numerous different locations of our program, we create another struct of type flag globally called errorFlag.
+    1. The integer value of this struct represents the error condition encountered within our program at any given time.
+    2. Since any thread could encounter an error at any given type, its lock is also used to ensure only one thread can update the error flag's condition
+    3. Some sources of errorFlag being updated are: When normalize does not return successful, if a thread encounters any type of error opening a file, directory, or any general error condition that may prevent the program from completing such as malloc return types, etc.
 
 
 ### Calling Normalize Method ###
