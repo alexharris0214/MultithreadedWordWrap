@@ -5,15 +5,26 @@
 - Maxim Yacun (NETID: my405) and Alexander Harris (NETID: ajh273)
 
 # Design
-### Reading Inputs: ###
-- We first validate the inputs within our main method. The first thing to check is the number of inputs. If we have one additional input, we know to work with standard input. If we have two additional inputs, the next thing to check is whether the third input is either a file or a directory. We use a statbuf struct to perform this check, and then proceed to call our normalize method with the proper inputs. Finally, if we have three additional inputs, we know we have an additional flag that indicates recursive directory traversal mode. In this case, we parse the flag to determine the number of threads to use for the recursive directory traversal.
-- (Normalize parameters described later in test plan). 
-- If no additional inputs were passed into our program, we exit with EXIT_FAILURE.
+### Data structures ###
+- Two queues are globally maintained for storing files to be normalized and directories to be traversed. This uses a queue struct, which contain a mutex and cond for synchronizing, a value to tell whether the queue has been closed, and a start and end node.
+- "Nodes" are a linked list structure which contain a pointer to a pathName struct and a pointer to the next node in the list.
+- For ease of composing filenames when they need to be used, the data stored in our queues' nodes are pathName structs.
+  - the pathName struct contains two strings which represent the "prefix" of a file's path and the actual file's name. For example, a file named "example.txt" inside of the directory "dir" will have a prefix of "dir" and a fileName of "example.txt". Our program has helper functions to compose an "input name" and an "output name" from a given pathName struct. This basically adds the necessary slashes and combines these two strings into a single path to the file which the struct represents for use in opening files or directories. The only difference between an "input name" and an "output name" is that the filename has "wrap." added before it.
+- The flag struct is most easily described as an integer with a mutex. This is used for globally tracking the number of active directory threads, as well as globally tracking the status which the program should exit with.
+
+### Main method: Preparing the fileQueue and dirQueue for traversal ###
+- We first ensure the inputs within our main method have the proper number for non-recursive or recursive mode. The arguments to the program are also checked for validity throughout, such as for "-rM,N" where M and N need to be positive integers. 
+- The program determines whether it is running in recursive mode or non-recursive mode by checking for the first argument to start with "-r"
+  - This is later used to ensure the recursive and non-recursive modes are not used incorrectly, and for running different parts of main depending on the application
+- After the lineLength argument is tested for validity and converted from string to integer, the rest of the arguments are assumed to be files and directories (if they are not existing files/dirs, the program will detect it later on and report the issue). We initialize the global data structures (queues and flags) and then iteratively enqueue these files and directories to the fileQueue and dirQueue, respectively. 
+  - If no files or directories are given as arguments and the program is not in recursive mode, it reads from STDIN and outputs to STDOUT, after which it exits with whatever status normalize() returns. If the program is in recursive mode and no files or directories are given, it reports the issue and exits with EXIT_FAILURE.
+- If the program is being run in recursive mode, the wrapper threads and directory threads are created to deal with the enqueued files and directories in their respective queues. The worker threads are immediately joined to the main thread once they terminate, the rest of dynamically allocated data is freed, and the program exits with whatever status is stored in the global exitFlag.
+- If the program is being run in non-recursive mode, main reuses the same basic machinery as recursive mode to process files. First, main dequeues all of the files given as arguments and outputs their wrapped version to STDOUT. Then, it dequeues all directory arguments and enqueues every file contained in only the top-level directory (and not in subdirectories). Lastly, it dequeues all remaining files in the file queue (those which were contained in directories) and outputs the wrapped version to "wrap.filename" wherever the original file is located. Main deallocates all dynamically allocated data and exits with the globally stored exitFlag.
 
 ### Working with Threads ###
 - In our main method, we first initialize the number of threads for the file worker method, which takes care of normalizing the files within a root directory and it's subdirectories, and the number of threads for the directory worker method, which takes care of traversing the directories and sending files to the fileworker for it to work on.
-- The way these two workers correlate is with use of a fileQueue.
-- The directory worker contains a directoryQueue, which is locked so only one thread can enqueue and dequeue at a time.
+- The way these two workers collaborate/communicate is with use of the fileQueue. Directory threads add to it and wrapper threads take from it.
+- The directory workers contains a directory queue, which is locked so only one thread can enqueue and dequeue at a time.
 - Whenever the directory worker encounters a directory file, it enqueue's it onto the directory queue, for another thread to pick it up. If it encounters a regular file, it enqueues it onto the file queue.
 - The file worker will then pick up any files from the fileQueue, one thread at a time, and begin to call the normalize method and place it's output in the correct spot.
 - The fileWorker threads will repeat this process until the fileQueue is empty AND the directory queue is closed, meaning that there are no more files coming into the queue.
@@ -88,13 +99,13 @@
 - The program should not be able to enter deadlock
 7) ww must not exit with any warnings from AddressSanitizer or LeakSanitizer
 8) The program must maintain a global value to track whether any thread encounters an error condition so that ww can return the correct exit code
-9) The program should use a smart, dynamically allocated method of keeping track of path names. 
-- When allocating pathnames, we know their length as strings and therefore do not need to use the inefficient strcat() in favor of memcpy(). 
-10) EXTRA CREDIT: The user should be able to give multiple files and directories in either non-recursive or recursive mode which should be processed correctly respective to the mode chosen
+9) The program should detect when the arguments given to it are invalid, report this to the user, and stop.
+10) EXTRA CREDIT: The user should be able to give multiple files and directories as arguments in either non-recursive or recursive mode which should be processed correctly respective of the mode chosen
 - Files given directly as arguments should output to STDOUT
+- When in non-recursive mode, files inside of subdirectories of directories given as arguments should not be normalized
+- In recursive mode, every file in every subdirectory of directories given as arguments should be normalized properly 
 
-
-### Test Plan for Wrapping all files correctly as in PA2, non-recursive mode (1) ###
+### Test Plan for Wrapping all files correctly as in PA2, non-recursive mode (condition 1) ###
 Overall, the test plan first involves three major I/O cases: STDIN to STDOUT, file to STDOUT, and directory to files
   - We run the program in all three of these cases (for the first, simply piping example1.txt or example2.txt to STDIN and comparing to the second case) to ensure our file I/O is working properly
 
@@ -124,7 +135,8 @@ Beyond trying different line length arguments, the test plan also involves a var
 ### Test Plan for Recursive Directory Traversal Mode ###
 For the recursive directory traversal method, we can safely make the assumption that normalize is working as intended with the above test cases working as intended. These test cases will test potentially problematic edge cases working with multiple threads and different directory structures.
 
-While running these test cases, we use the printf() function in our thread workers to display which threads start and exit when, to ensure we are using a proper amount of threads as the user requests as well as closing them all at the right time. Each of these test cases  (Tests conditions 2, 3, and 4 for thread number)
+While running these test cases, we use the printf() function in our thread workers to display which threads start and exit when, to ensure we are using a proper amount of threads as the user requests as well as closing them all at the right time. (Tests conditions 2, 3, and 4 for thread number) 
+Additionally, all of our tests utilize LeakSanitizer and AddressSanitizer including when compiling ww; this ensures test condition #7 since we have no systematic way of freeing data all at once that requires any testing.
 
 - To rigorously test conditions 2, 3, 4, and 5, we have a directory structured like below:
                               
@@ -141,9 +153,17 @@ While running these test cases, we use the printf() function in our thread worke
  - In the next test case is our "base case" for directory traversal. We have a directory structure with a couple of test files for wrapping within the root directory. This is to assure that the word wrap still works as intended from last project with multi-threading. This is also done to test that the directory queue is closing correctly, despite nothing ever being enqueued by the directory threads.
 - We also test an edge case where we have a directory structure with multiple subdirectories, all having no regular files within them, including the root directory. This is done to assure the file threads are closing properly, even when never being used to wrap files.
 
-- To test condition #9, we give the program a single empty text file among normally populated text files to wrap and run it in recursive mode with multiple file-wrapping threads. normalize() prints an error message and returns EXIT_FAILURE if it runs into an empty text file. This test verifies that global tracking of exit code works as intended, since only one file worker will encounter this .
+- To test condition #8, we give the program a single empty text file among normally populated text files to wrap and run it in recursive mode with multiple file-wrapping threads. normalize() prints an error message and returns EXIT_FAILURE if it runs into an empty text file. This test verifies that global tracking of exit code works as intended, since only one file worker will encounter this EXIT_FAILURE from normalize while all others should get EXIT_SUCCESS. We verify that ww returned EXIT_FAILURE by running "echo $?", which results in "1" when this test case is successful.
 
-### Test Plan for Extra Credit ###
-Aside from the test cases described in non-rerusive traversal mode, there a few more edge cases to cover, since we can extend our program to work with recursive mode, but extending to describe which specific directories/files to cover.
-- Case were we specify recursvie mode but provide a file, the file is wrapped using a singular file thread, and the directory thread does nothing besides being created and destroyed.
-- Case were we specify recursive mode but provide a file that is within a specified directory, recursive flag is ignored and file is wrapped using one file thread
+- To test condition #9, we run WordWrap with invalid arguments such as -r0,0 or a file that does not exist to ensure the program reports back the correct error and fails to execute. Additionally, we test that the program detects when arguments are not formatted correctly by testing without a lineLength argument and giving no file arguments when in recursive mode. 
+
+### Test Plan for Extra Credit (condition 10) ###
+To test that providing multiple directories and files works as intended, we pass the "root" directory described above as well as a second, similar directory and a third empty directory. In between these directories as arguments, we also give two different text files in the same directory as the executable to ensure that they both get output to STDOUT. We try this same structure in both recursive and non-recursive mode, and then verify that in recursive mode, all files in every subdirectory are normalized, and that in non-recursive mode, only files inside of the immediate directory given are normalized. 
+
+The program should still be able to take data from STDIN and output to STDOUT in non-recursive mode (it would not make sense to do this in recursive mode, so it is explicitly disallowed in our implementation). We test by giving the program only a line length argument to ensure that it works exactly as in Project II when using this mode.
+
+The program still needs to maintain the ability to return with the right exit code if an error is encountered. We pass one empty file in one of the arguments, with the rest being unproblematic to ensure that running ww with these results in an exit code of "1" when checked with "echo $?". 
+
+Lastly, there are a couple of edge cases we thought would be helpful to check for validity: 
+- The first is when we specify recursive mode but provide a single file; the file is wrapped using a singular file thread, and the directory threads and the rest of the wrapper threads do nothing besides being created and destroyed. 
+- We also test the case where we provide a file that is within a directory; in this case, main needs to detect that there is a prefix for this file and enqueue it with the proper prefix so that it can later be found by the file system. For example, we give "/root/example1.txt" as an argument.
