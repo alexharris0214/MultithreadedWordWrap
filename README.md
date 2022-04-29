@@ -1,6 +1,6 @@
 # MultiThreaded WordWrap
 - CS214
-- Group 39
+- Group 53
 # Authors
 - Maxim Yacun (NETID: my405) and Alexander Harris (NETID: ajh273)
 
