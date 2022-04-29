@@ -454,11 +454,23 @@ int main(int argc, char **argv)
         }
         newPath = (struct pathName *)malloc(sizeof(struct pathName));
 
-        // checking to see if a file or directory was read
-        newPath->prefix = (char *)malloc(1);
-        newPath->fileName = (char *)malloc(strlen(argv[i]) + 1);
-        memset(newPath->prefix, '\0', 1);
-        memcpy(newPath->fileName, argv[i], strlen(argv[i]) + 1);
+        char *argName = strrchr(argv[i], '/');
+
+        if(argName == NULL){                                     //file has no prefix
+            newPath->prefix = (char *)malloc(1);
+            newPath->fileName = (char *)malloc(strlen(argv[i]) + 1);
+            memset(newPath->prefix, '\0', 1);
+            memcpy(newPath->fileName, argv[i], strlen(argv[i]) + 1);
+        } else {                                                 //file given has a prefix, and we must process it
+            int argNameLeng = strlen(argName + 1);     //+1 because strrchr returns a pointer to the '/'
+            int argLeng = strlen(argv[i]);
+            newPath->prefix = (char *)malloc(argLeng - argNameLeng + 1);
+            newPath->fileName = (char *)malloc(argNameLeng + 1);
+            memcpy(newPath->prefix, argv[i], argLeng - argNameLeng);
+            memset(newPath->prefix + (argLeng - argNameLeng), '\0', 1);
+            memcpy(newPath->fileName, argv[i] + (argLeng - argNameLeng), argNameLeng);
+            memset(newPath->fileName + argNameLeng, '\0', 1);
+        }
         
         char *newFileName = getInputName(newPath);
         stat(newFileName, &statbuf);
